@@ -1,0 +1,147 @@
+"""
+Celery application configuration.
+
+This module sets up Celery with:
+- Redis as broker and result backend
+- Beat schedule for automated tasks
+- Task autodiscovery
+- Automatic retries for transient failures
+
+Production features:
+- Exponential backoff on retries (2, 4, 8 seconds)
+- Max 3 retries for transient failures
+- Task time limits to prevent hangs
+- Proper error handling and logging
+"""
+from celery import Celery
+from celery.schedules import crontab
+
+from src.config.settings import settings
+
+# Create Celery app
+app = Celery(
+    "polymarket_ml",
+    broker=settings.celery_broker_url,
+    backend=settings.celery_result_backend,
+)
+
+# Configure Celery
+app.conf.update(
+    # Serialization
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    # Timezone
+    timezone="UTC",
+    enable_utc=True,
+    # Task tracking
+    task_track_started=True,
+    task_time_limit=300,  # 5 minute max per task
+    task_soft_time_limit=270,  # Soft limit at 4.5 minutes
+    # Worker settings
+    worker_prefetch_multiplier=1,  # Don't prefetch too many tasks
+    worker_concurrency=4,
+    # Result settings
+    result_expires=3600,  # Results expire after 1 hour
+
+    # === RETRY CONFIGURATION (production-grade) ===
+    task_acks_late=True,  # Ack after task completes (prevents loss on worker crash)
+    task_reject_on_worker_lost=True,  # Requeue if worker dies
+    task_default_retry_delay=2,  # 2 second initial retry delay
+    task_max_retries=3,  # Max 3 retries
+    task_autoretry_for=(
+        # Transient errors that should be retried
+        Exception,  # Will be narrowed in task decorators
+    ),
+    task_retry_backoff=True,  # Exponential backoff
+    task_retry_backoff_max=60,  # Max 60 second delay
+    task_retry_jitter=True,  # Add jitter to prevent thundering herd
+
+    # Task routing
+    task_routes={
+        "src.tasks.snapshots.snapshot_tier": {"queue": "snapshots"},
+        "src.tasks.snapshots.snapshot_tier_batch": {"queue": "snapshots"},
+        "src.tasks.snapshots.warm_gamma_cache": {"queue": "snapshots"},
+        "src.tasks.discovery.*": {"queue": "discovery"},
+    },
+    # Default queue
+    task_default_queue="default",
+)
+
+# Beat schedule - all automated tasks
+app.conf.beat_schedule = {
+    # === CACHE WARMING ===
+    # Pre-warm Gamma cache every 8 seconds for high-frequency tiers
+    "warm-gamma-cache": {
+        "task": "src.tasks.snapshots.warm_gamma_cache",
+        "schedule": 8.0,  # Every 8 seconds
+    },
+    # === DISCOVERY TASKS ===
+    # Find new markets every hour
+    "discover-markets": {
+        "task": "src.tasks.discovery.discover_markets",
+        "schedule": crontab(minute=0),  # Every hour at :00
+    },
+    # Reassign tiers every 5 minutes
+    "update-tiers": {
+        "task": "src.tasks.discovery.update_market_tiers",
+        "schedule": crontab(minute="*/5"),
+    },
+    # Check for resolved markets every 15 minutes
+    "check-resolutions": {
+        "task": "src.tasks.discovery.check_resolutions",
+        "schedule": crontab(minute="*/15"),
+    },
+    # Cleanup stale T4 markets (expired or no trades in 1 hour)
+    "cleanup-stale-markets": {
+        "task": "src.tasks.discovery.cleanup_stale_markets",
+        "schedule": crontab(minute="*/10"),  # Every 10 minutes
+    },
+    # === SNAPSHOT TASKS ===
+    # Tier 0: > 48h to resolution, hourly snapshots
+    "snapshot-tier-0": {
+        "task": "src.tasks.snapshots.snapshot_tier",
+        "schedule": crontab(minute=5),  # Every hour at :05
+        "args": [0],
+    },
+    # Tier 1: 12-48h to resolution, 5 minute snapshots
+    "snapshot-tier-1": {
+        "task": "src.tasks.snapshots.snapshot_tier",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+        "args": [1],
+    },
+    # Tier 2: 4-12h to resolution, 1 minute snapshots
+    "snapshot-tier-2": {
+        "task": "src.tasks.snapshots.snapshot_tier",
+        "schedule": 60.0,  # Every 60 seconds
+        "args": [2],
+    },
+    # Tier 3: 1-4h to resolution, 30 second snapshots (batched for throughput)
+    "snapshot-tier-3-batch-0": {
+        "task": "src.tasks.snapshots.snapshot_tier_batch",
+        "schedule": 30.0,  # Every 30 seconds
+        "args": [3, 0, 2],  # tier=3, batch=0, total_batches=2
+    },
+    "snapshot-tier-3-batch-1": {
+        "task": "src.tasks.snapshots.snapshot_tier_batch",
+        "schedule": 30.0,  # Every 30 seconds
+        "args": [3, 1, 2],  # tier=3, batch=1, total_batches=2
+    },
+    # Tier 4: < 1h to resolution, 15 second snapshots (batched for throughput)
+    "snapshot-tier-4-batch-0": {
+        "task": "src.tasks.snapshots.snapshot_tier_batch",
+        "schedule": 15.0,  # Every 15 seconds
+        "args": [4, 0, 2],  # tier=4, batch=0, total_batches=2
+    },
+    "snapshot-tier-4-batch-1": {
+        "task": "src.tasks.snapshots.snapshot_tier_batch",
+        "schedule": 15.0,  # Every 15 seconds
+        "args": [4, 1, 2],  # tier=4, batch=1, total_batches=2
+    },
+}
+
+# Import tasks to register them with Celery
+app.autodiscover_tasks(["src.tasks"])
+
+# Explicitly import to ensure registration
+from src.tasks import discovery, snapshots  # noqa: F401, E402
