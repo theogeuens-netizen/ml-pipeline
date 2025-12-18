@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from celery import shared_task
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 import structlog
 
 from src.config.settings import settings
@@ -468,6 +468,43 @@ def cleanup_stale_markets() -> dict:
         "deactivated_expired": deactivated_expired,
         "deactivated_no_trades": deactivated_no_trades,
     }
+
+
+@shared_task(name="src.tasks.discovery.cleanup_old_task_runs")
+def cleanup_old_task_runs() -> dict:
+    """
+    Delete old task_runs records to prevent unbounded table growth.
+
+    This is operational/diagnostic data, NOT market data.
+    Keeps last 7 days of task runs for debugging purposes.
+
+    Returns:
+        Dictionary with deleted count
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+
+    with get_session() as session:
+        # Count before delete for reporting
+        old_count = session.execute(
+            select(func.count(TaskRun.id)).where(TaskRun.started_at < cutoff)
+        ).scalar() or 0
+
+        if old_count > 0:
+            # Delete old records
+            session.execute(
+                TaskRun.__table__.delete().where(TaskRun.started_at < cutoff)
+            )
+            session.commit()
+
+            logger.info(
+                "Cleaned up old task_runs",
+                deleted=old_count,
+                cutoff=cutoff.isoformat(),
+            )
+
+    return {"deleted": old_count, "cutoff": cutoff.isoformat()}
 
 
 # === Task Run Tracking ===

@@ -7,6 +7,8 @@ This API provides monitoring endpoints for:
 - Market data
 - Task status
 - Data quality metrics
+- Executor management
+- Strategy configuration
 """
 from contextlib import asynccontextmanager
 
@@ -15,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import structlog
 
 from src.api.routes import health, stats, markets, tasks, data_quality, monitoring, database
+from src.api.routes import executor, strategies, executor_config, executor_ws
 
 logger = structlog.get_logger()
 
@@ -51,6 +54,12 @@ app.include_router(tasks.router, prefix="/api", tags=["Tasks"])
 app.include_router(data_quality.router, prefix="/api", tags=["Data Quality"])
 app.include_router(monitoring.router, prefix="/api", tags=["Monitoring"])
 app.include_router(database.router, prefix="/api", tags=["Database"])
+
+# Executor routers
+app.include_router(executor.router, prefix="/api", tags=["Executor"])
+app.include_router(strategies.router, prefix="/api", tags=["Strategies"])
+app.include_router(executor_config.router, prefix="/api", tags=["Executor Config"])
+app.include_router(executor_ws.router, prefix="/api", tags=["Executor WebSocket"])
 
 
 @app.get("/")

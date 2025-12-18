@@ -86,12 +86,32 @@ class Settings(BaseSettings):
     websocket_enabled_tiers: list[int] = [2, 3, 4]  # Only T2+ get WS
     websocket_reconnect_delay: float = 5.0
     websocket_max_reconnect_delay: float = 60.0
+    websocket_num_connections: int = 4  # Number of parallel WS connections (500 markets each)
 
     # ===========================================
     # Application
     # ===========================================
     log_level: str = "INFO"
     debug: bool = False
+
+    # ===========================================
+    # Executor (Trading)
+    # ===========================================
+    # Polymarket trading credentials
+    polymarket_private_key: str = ""
+    polymarket_funder_address: str = ""
+
+    # Proxy for bypassing IP blocks (optional SOCKS5 URL)
+    trading_proxy_url: str = ""
+
+    # Executor mode (paper or live)
+    executor_mode: str = "paper"
+
+    # Path to executor config.yaml
+    executor_config_path: str = "config.yaml"
+
+    # Paper trading starting balance
+    paper_starting_balance: float = 10000.0
 
 
 @lru_cache()

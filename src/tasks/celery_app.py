@@ -97,6 +97,11 @@ app.conf.beat_schedule = {
         "task": "src.tasks.discovery.cleanup_stale_markets",
         "schedule": crontab(minute="*/10"),  # Every 10 minutes
     },
+    # Cleanup old task_runs (operational data, keeps 7 days)
+    "cleanup-old-task-runs": {
+        "task": "src.tasks.discovery.cleanup_old_task_runs",
+        "schedule": crontab(hour=3, minute=30),  # Daily at 3:30 AM UTC
+    },
     # === SNAPSHOT TASKS ===
     # Tier 0: > 48h to resolution, hourly snapshots
     "snapshot-tier-0": {

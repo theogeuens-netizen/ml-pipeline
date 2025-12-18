@@ -211,6 +211,219 @@ export interface ConnectionStatus {
   }
 }
 
+// Executor types
+export interface ExecutorStatus {
+  mode: 'paper' | 'live'
+  running: boolean
+  balance: number
+  total_value: number
+  stats: ExecutorStats
+  enabled_strategies: string[]
+  risk_limits: {
+    max_position_usd: number
+    max_total_exposure_usd: number
+    max_positions: number
+    max_drawdown_pct: number
+  }
+}
+
+export interface ExecutorStats {
+  balance: number
+  starting_balance?: number
+  total_pnl?: number
+  total_pnl_pct?: number
+  realized_pnl?: number
+  high_water_mark?: number
+  low_water_mark?: number
+  max_drawdown?: number
+  open_positions: number
+  total_trades: number
+  closed_positions?: number
+  winning_trades?: number
+  losing_trades?: number
+  win_rate?: number
+}
+
+export interface ExecutorPosition {
+  id: number
+  is_paper: boolean
+  strategy_name: string
+  market_id: number
+  token_id: string
+  side: string
+  status: string
+  entry_price: number | null
+  exit_price: number | null
+  current_price: number | null
+  size_shares: number | null
+  cost_basis: number | null
+  current_value: number | null
+  unrealized_pnl: number | null
+  unrealized_pnl_pct: number | null
+  realized_pnl: number | null
+  entry_time: string | null
+  exit_time: string | null
+  close_reason: string | null
+  hedge_position_id: number | null
+}
+
+export interface ExecutorSignal {
+  id: number
+  strategy_name: string
+  market_id: number
+  token_id: string
+  side: string
+  status: string
+  reason: string
+  edge: number | null
+  confidence: number | null
+  price_at_signal: number | null
+  best_bid: number | null
+  best_ask: number | null
+  suggested_size_usd: number | null
+  status_reason: string | null
+  created_at: string | null
+  processed_at: string | null
+}
+
+export interface ExecutorTrade {
+  id: number
+  order_id: number
+  position_id: number | null
+  is_paper: boolean
+  price: number | null
+  size_shares: number | null
+  size_usd: number | null
+  side: string
+  fee_usd: number | null
+  executed_at: string | null
+}
+
+export interface ExecutorOrder {
+  id: number
+  signal_id: number
+  is_paper: boolean
+  token_id: string
+  side: string
+  order_type: string
+  status: string
+  limit_price: number | null
+  executed_price: number | null
+  size_usd: number | null
+  size_shares: number | null
+  filled_shares: number | null
+  polymarket_order_id: string | null
+  submitted_at: string | null
+  filled_at: string | null
+  error_message: string | null
+}
+
+export interface Strategy {
+  name: string
+  description: string
+  version: string
+  enabled: boolean
+  params: Record<string, unknown>
+}
+
+export interface StrategyStats {
+  strategy: string
+  signals: {
+    total: number
+    pending: number
+    approved: number
+    executed: number
+    rejected: number
+  }
+  positions: {
+    total: number
+    open: number
+    closed: number
+    winning: number
+    losing: number
+    win_rate: number
+  }
+  pnl: {
+    total_realized: number
+    average_per_trade: number
+  }
+}
+
+export interface ExecutorConfig {
+  mode: string
+  settings: {
+    scan_interval_seconds: number
+    log_level: string
+  }
+  risk: {
+    max_position_usd: number
+    max_total_exposure_usd: number
+    max_positions: number
+    max_drawdown_pct: number
+  }
+  sizing: {
+    method: string
+    fixed_amount_usd: number
+    kelly_fraction: number
+    max_size_usd: number | null
+  }
+  execution: {
+    default_order_type: string
+    limit_offset_bps: number
+    market_slippage_bps: number
+    max_retry_attempts: number
+  }
+  filters: {
+    min_liquidity_usd: number
+    min_volume_24h_usd: number
+    excluded_keywords: string[]
+  }
+  strategies: Record<string, { enabled: boolean; params: Record<string, unknown> }>
+}
+
+// Wallet types
+export interface WalletPosition {
+  asset_id: string
+  market: string
+  outcome: string
+  size: number
+  cost_basis: number
+  avg_price: number
+  trades: string[]
+}
+
+export interface WalletStatus {
+  success: boolean
+  wallet_address: string
+  usdc_balance: number
+  position_value: number
+  total_value: number
+  positions: WalletPosition[]
+  open_orders: number
+  error?: string
+}
+
+export interface WalletTrade {
+  id: string
+  market: string
+  asset_id: string
+  side: string
+  size: string
+  price: string
+  outcome: string
+  status: string
+  transaction_hash: string
+}
+
+export interface WalletSyncResult {
+  success: boolean
+  synced: number
+  updated: number
+  errors: string[]
+  total_positions: number
+  usdc_balance: number
+}
+
 // Database browser types
 export interface TableInfo {
   name: string
@@ -297,5 +510,175 @@ export const api = {
     if (params?.order) searchParams.set('order', params.order)
     const qs = searchParams.toString()
     return fetchJson<TableData>(`/api/database/tables/${tableName}${qs ? `?${qs}` : ''}`)
+  },
+
+  // Executor endpoints
+  getExecutorStatus: () => fetchJson<ExecutorStatus>('/api/executor/status'),
+  getExecutorBalance: () => fetchJson<{ mode: string; paper: ExecutorStats; live: ExecutorStats | null }>('/api/executor/balance'),
+
+  getPositions: (params?: {
+    status?: string
+    strategy?: string
+    is_paper?: boolean
+    limit?: number
+    offset?: number
+  }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.status) searchParams.set('status', params.status)
+    if (params?.strategy) searchParams.set('strategy', params.strategy)
+    if (params?.is_paper !== undefined) searchParams.set('is_paper', String(params.is_paper))
+    if (params?.limit) searchParams.set('limit', String(params.limit))
+    if (params?.offset) searchParams.set('offset', String(params.offset))
+    const qs = searchParams.toString()
+    return fetchJson<{ total: number; items: ExecutorPosition[] }>(`/api/executor/positions${qs ? `?${qs}` : ''}`)
+  },
+
+  closePosition: async (positionId: number, exitPrice?: number, reason?: string) => {
+    const searchParams = new URLSearchParams()
+    if (exitPrice) searchParams.set('exit_price', String(exitPrice))
+    if (reason) searchParams.set('reason', reason)
+    const qs = searchParams.toString()
+    const response = await fetch(`${API_BASE}/api/executor/positions/${positionId}/close${qs ? `?${qs}` : ''}`, {
+      method: 'POST',
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json()
+  },
+
+  getSignals: (params?: {
+    status?: string
+    strategy?: string
+    limit?: number
+    offset?: number
+  }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.status) searchParams.set('status', params.status)
+    if (params?.strategy) searchParams.set('strategy', params.strategy)
+    if (params?.limit) searchParams.set('limit', String(params.limit))
+    if (params?.offset) searchParams.set('offset', String(params.offset))
+    const qs = searchParams.toString()
+    return fetchJson<{ total: number; items: ExecutorSignal[] }>(`/api/executor/signals${qs ? `?${qs}` : ''}`)
+  },
+
+  getTrades: (params?: {
+    is_paper?: boolean
+    limit?: number
+    offset?: number
+  }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.is_paper !== undefined) searchParams.set('is_paper', String(params.is_paper))
+    if (params?.limit) searchParams.set('limit', String(params.limit))
+    if (params?.offset) searchParams.set('offset', String(params.offset))
+    const qs = searchParams.toString()
+    return fetchJson<{ total: number; items: ExecutorTrade[] }>(`/api/executor/trades${qs ? `?${qs}` : ''}`)
+  },
+
+  resetPaperTrading: async (startingBalance?: number) => {
+    const searchParams = new URLSearchParams()
+    if (startingBalance) searchParams.set('starting_balance', String(startingBalance))
+    const qs = searchParams.toString()
+    const response = await fetch(`${API_BASE}/api/executor/reset-paper${qs ? `?${qs}` : ''}`, {
+      method: 'POST',
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json()
+  },
+
+  // Strategy endpoints
+  getStrategies: () => fetchJson<{ total: number; items: Strategy[] }>('/api/strategies'),
+
+  getStrategy: (name: string) => fetchJson<Strategy & {
+    state: unknown;
+    statistics: { signals_generated: number; signals_executed: number; signals_rejected: number };
+    sizing: { method: string; fixed_amount_usd: number } | null;
+    execution: { order_type: string; limit_offset_bps: number } | null;
+  }>(`/api/strategies/${name}`),
+
+  getStrategyStats: (name: string) => fetchJson<StrategyStats>(`/api/strategies/${name}/stats`),
+
+  enableStrategy: async (name: string, enabled: boolean) => {
+    const response = await fetch(`${API_BASE}/api/strategies/${name}/enable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json()
+  },
+
+  updateStrategyConfig: async (name: string, config: { enabled?: boolean; params?: Record<string, unknown> }) => {
+    const response = await fetch(`${API_BASE}/api/strategies/${name}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json()
+  },
+
+  // Executor config endpoints
+  getExecutorConfig: () => fetchJson<ExecutorConfig>('/api/executor/config'),
+
+  getTradingMode: () => fetchJson<{ mode: string; available_modes: string[] }>('/api/executor/config/mode'),
+
+  setTradingMode: async (mode: string) => {
+    const response = await fetch(`${API_BASE}/api/executor/config/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json()
+  },
+
+  updateRiskConfig: async (config: Partial<{
+    max_position_usd: number
+    max_total_exposure_usd: number
+    max_positions: number
+    max_drawdown_pct: number
+  }>) => {
+    const response = await fetch(`${API_BASE}/api/executor/config/risk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json()
+  },
+
+  updateSizingConfig: async (config: Partial<{
+    method: string
+    fixed_amount_usd: number
+    kelly_fraction: number
+    max_size_usd: number
+  }>) => {
+    const response = await fetch(`${API_BASE}/api/executor/config/sizing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json()
+  },
+
+  reloadConfig: async () => {
+    const response = await fetch(`${API_BASE}/api/executor/config/reload`, {
+      method: 'POST',
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json()
+  },
+
+  // Wallet endpoints (live Polymarket wallet)
+  getWalletStatus: () => fetchJson<WalletStatus>('/api/executor/wallet'),
+
+  getWalletTrades: () => fetchJson<{ success: boolean; total: number; trades: WalletTrade[] }>('/api/executor/wallet/trades'),
+
+  syncWallet: async () => {
+    const response = await fetch(`${API_BASE}/api/executor/wallet/sync`, {
+      method: 'POST',
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json() as Promise<WalletSyncResult>
   },
 }

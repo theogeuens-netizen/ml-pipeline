@@ -29,6 +29,11 @@ numpy==1.26.3
 python-dotenv==1.0.0
 structlog==24.1.0
 tenacity==8.2.3
+pyyaml==6.0.1
+
+# Polymarket Trading
+py-clob-client==0.18.0
+PySocks==1.7.1  # SOCKS proxy support for requests
 
 # Testing
 pytest==7.4.4

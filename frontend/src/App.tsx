@@ -7,9 +7,11 @@ import DataQuality from './pages/DataQuality'
 import Tasks from './pages/Tasks'
 import Monitoring from './pages/Monitoring'
 import Database from './pages/Database'
+import Trading from './pages/Trading'
 
 const navLinks = [
   { path: '/', label: 'Dashboard' },
+  { path: '/trading', label: 'Trading' },
   { path: '/markets', label: 'Markets' },
   { path: '/data-quality', label: 'Data Quality' },
   { path: '/tasks', label: 'Tasks' },
@@ -58,6 +60,7 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/trading" element={<Trading />} />
           <Route path="/markets" element={<Markets />} />
           <Route path="/markets/:id" element={<MarketDetail />} />
           <Route path="/data-quality" element={<DataQuality />} />

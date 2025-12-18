@@ -41,17 +41,18 @@ Strategy:
 
 ---
 
-## Current System Stats (Dec 17, 2024 - Evening)
+## Current System Stats (Dec 18, 2024)
 
 | Metric | Value |
 |--------|-------|
-| Markets tracked | **2,369** |
-| Snapshots collected | **342,965** |
-| Trades collected | **3,357** |
-| Orderbook snapshots | **874** (newly enabled) |
+| Markets tracked | **9,269** |
+| Snapshots collected | **1,148,567** |
+| Trades collected | **75,938** |
+| Orderbook snapshots | **494,959** |
 | Task success rate | **99.1%** |
 | WebSocket status | **HEALTHY** |
-| Trades per minute | **~27** |
+| Trades per minute | **~380** (was ~10 before 4-connection fix) |
+| WebSocket connections | **4 parallel** (2000 market capacity) |
 
 ---
 
@@ -63,6 +64,7 @@ Current settings (`src/config/settings.py`):
 - **Orderbook concurrency**: 100 parallel fetches
 - **Metrics concurrency**: 150 parallel fetches
 - **WebSocket enabled tiers**: T2, T3, T4
+- **WebSocket connections**: 4 parallel (configurable via `websocket_num_connections`)
 - **Orderbook enabled tiers**: T2, T3, T4
 
 ---
@@ -299,6 +301,44 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 - Structured logging with context for remote debugging
 - 0% error rate after restart with new code
 
+### Session 6 - Dec 18, 2024 (WebSocket Scaling)
+**Problem**: Only capturing ~10 trades/minute despite 1,293 eligible markets
+**Root Cause**: 2 WebSocket connections × 500 limit = 1,000 capacity, but 1,293 markets needed
+
+**Fixes**:
+- **Increased connections**: 2 → 4 parallel WebSocket connections (configurable via `websocket_num_connections`)
+- **Fixed connection initialization**: Added `collector.running = True` for managed collectors
+- **Improved market distribution**: Round-robin assignment ensures each connection gets mix of tiers
+
+**Results**:
+- WebSocket coverage: 0 missing markets (was 73 missing)
+- Trade rate: **~380 trades/minute** (was ~10)
+- All 4 connections actively receiving data (verified via logs)
+- Capacity: 2,000 markets (can increase further if needed)
+
+---
+
+### Session 7 - Dec 18, 2024 (Autonomous Operation Hardening)
+**Goal**: Make system run reliably for days/weeks without intervention
+
+**Fixes**:
+- **Docker log rotation**: Added `max-size: 50m, max-file: 3` to all containers (prevents log disk fill)
+- **Critical health endpoint**: New `/api/monitoring/critical` returns HTTP 503 on failures, checks:
+  - Disk usage (warn >90%, critical >95%)
+  - PostgreSQL connection pool exhaustion
+  - Redis connectivity and memory
+  - WebSocket activity (trades in last 5 min)
+  - Task success rate (warn <90%, critical <80%)
+  - Celery queue backlog (warn >500, critical >1000)
+- **Staggered WebSocket reconnection**: Connections 0-3 stagger by 0/2/4/6s on startup and 0/3/6/9s on reconnect (prevents data gaps when all reconnect at once)
+- **task_runs cleanup**: Daily job at 3:30 AM UTC deletes records >7 days old (operational data, not market data)
+- **Connection pool monitoring**: Added to critical health endpoint
+
+**Results**:
+- System status: **healthy** with 100% task success rate
+- All 4 WebSocket connections stagger correctly on startup
+- Log files capped at 150MB total per container
+
 ---
 
 ## Monitoring Endpoints
@@ -306,8 +346,10 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /api/monitoring/health` | System health (WebSocket, tasks, trades/min) |
+| `GET /api/monitoring/critical` | **Returns 503 on failures** - for external monitoring |
 | `GET /api/monitoring/websocket-coverage` | Compare subscribed vs should-subscribe |
 | `GET /api/monitoring/subscription-health` | Verify markets receiving data |
+| `GET /api/monitoring/connections` | DB pool, Redis, WebSocket connection details |
 | `GET /api/monitoring/field-completeness` | Field population % by category/tier |
 | `GET /api/monitoring/errors?limit=50` | Recent task errors with tracebacks |
 | `GET /api/database/tables` | List all tables with row counts |
@@ -319,10 +361,10 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 
 | Table | Purpose | Row Count |
 |-------|---------|-----------|
-| markets | Market metadata, tier, token IDs | ~2,400 |
-| snapshots | Price/volume/orderbook features | ~343,000 |
-| trades | Individual trades from WebSocket | ~3,400 |
-| orderbook_snapshots | Full orderbook storage (JSONB) | ~900 |
+| markets | Market metadata, tier, token IDs | ~9,300 |
+| snapshots | Price/volume/orderbook features | ~1,148,000 |
+| trades | Individual trades from WebSocket | ~76,000 |
+| orderbook_snapshots | Full orderbook storage (JSONB) | ~495,000 |
 | task_runs | Task execution history | varies |
 | whale_events | Large trade tracking | - |
 
@@ -330,10 +372,11 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 
 ## Notes for Next Session
 
-- Data collection is stable and running at 99%+ success rate
-- All monitoring infrastructure is in place
-- Orderbook snapshots now being collected
-- **WebSocket fixed** - now receiving ~10 trades/minute (was 0)
+- Data collection is stable and running at **100% task success rate**
+- WebSocket capturing **~380 trades/minute** across 4 connections
+- System hardened for autonomous operation (log rotation, health checks, staggered reconnects)
+- Use `/api/monitoring/critical` for external uptime monitoring (returns 503 on failure)
+- **Disk usage at 70%** - will need to move data to cold storage eventually or add disk space
 - **Next priorities**:
   1. Monitor data accumulation over coming days/weeks
   2. Begin ML pipeline design once sufficient resolved markets exist

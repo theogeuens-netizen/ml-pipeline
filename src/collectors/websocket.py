@@ -533,6 +533,7 @@ class MultiConnectionCollector:
         for i in range(self.num_connections):
             collector = WebSocketCollector(managed=True)
             collector.connection_id = i  # Tag for logging
+            collector.running = True  # Enable the collector's run loop
             self.collectors.append(collector)
 
         # Override subscription logic to split markets across connections
@@ -553,7 +554,17 @@ class MultiConnectionCollector:
             pass
 
     async def _run_collector(self, collector: WebSocketCollector, conn_id: int) -> None:
-        """Run a single collector with its assigned markets."""
+        """Run a single collector with its assigned markets.
+
+        Uses staggered reconnection delays to prevent all connections
+        from reconnecting simultaneously (which would cause data gaps).
+        """
+        # Stagger initial connection by connection ID to avoid thundering herd
+        if conn_id > 0:
+            stagger_delay = conn_id * 2  # 0s, 2s, 4s, 6s for connections 0-3
+            logger.info("Staggering initial connection", connection=conn_id, delay=stagger_delay)
+            await asyncio.sleep(stagger_delay)
+
         while self.running:
             try:
                 await collector._connect_and_run()
@@ -568,11 +579,22 @@ class MultiConnectionCollector:
                 logger.error("WebSocket error", connection=conn_id, error=str(e))
 
             if self.running:
-                delay = collector.reconnect_delay
-                logger.info("Reconnecting", connection=conn_id, delay=delay)
-                await asyncio.sleep(delay)
+                # Stagger reconnection: base delay + connection-specific offset
+                # This ensures connections don't all reconnect at the same time
+                base_delay = collector.reconnect_delay
+                stagger_offset = conn_id * 3  # 0s, 3s, 6s, 9s offset
+                total_delay = base_delay + stagger_offset
+
+                logger.info(
+                    "Reconnecting with stagger",
+                    connection=conn_id,
+                    base_delay=base_delay,
+                    stagger_offset=stagger_offset,
+                    total_delay=total_delay,
+                )
+                await asyncio.sleep(total_delay)
                 collector.reconnect_delay = min(
-                    delay * 1.5,
+                    base_delay * 1.5,
                     settings.websocket_max_reconnect_delay
                 )
 
@@ -609,11 +631,16 @@ class MultiConnectionCollector:
             )
             market_data = market_data[:total_capacity]
 
-        # Split markets evenly across connections
+        # Distribute markets evenly across connections (round-robin for better balance)
+        # This ensures each connection gets a mix of tiers rather than one getting all T4
+        markets_per_connection: list[list[dict]] = [[] for _ in range(self.num_connections)]
+        for idx, market in enumerate(market_data):
+            conn_idx = idx % self.num_connections
+            if len(markets_per_connection[conn_idx]) < MAX_SUBSCRIPTIONS:
+                markets_per_connection[conn_idx].append(market)
+
         for i, collector in enumerate(self.collectors):
-            start_idx = i * MAX_SUBSCRIPTIONS
-            end_idx = start_idx + MAX_SUBSCRIPTIONS
-            assigned = market_data[start_idx:end_idx]
+            assigned = markets_per_connection[i]
 
             collector.subscribed_markets = {
                 m["condition_id"]: {
@@ -658,7 +685,8 @@ class MultiConnectionCollector:
 async def run_collector() -> None:
     """Entry point for WebSocket collector service."""
     # Use multi-connection collector to handle >500 markets
-    collector = MultiConnectionCollector(num_connections=2)
+    # 4 connections = 2000 market capacity (configurable via settings)
+    collector = MultiConnectionCollector(num_connections=settings.websocket_num_connections)
 
     # Handle shutdown signals
     loop = asyncio.get_event_loop()

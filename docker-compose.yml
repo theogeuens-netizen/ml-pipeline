@@ -1,5 +1,12 @@
 version: "3.8"
 
+# Default logging configuration to prevent disk fill from container logs
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   # === INFRASTRUCTURE ===
   postgres:
@@ -18,6 +25,7 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
 
   redis:
     image: redis:7-alpine
@@ -32,6 +40,7 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
 
   # === APPLICATION SERVICES ===
   api:
@@ -57,6 +66,7 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+    logging: *default-logging
 
   celery-worker:
     build: .
@@ -80,6 +90,7 @@ services:
       retries: 3
       start_period: 60s
     restart: unless-stopped
+    logging: *default-logging
 
   # Dedicated workers for high-frequency snapshot tasks (2 workers for throughput)
   celery-snapshots:
@@ -104,6 +115,7 @@ services:
       retries: 3
       start_period: 60s
     restart: unless-stopped
+    logging: *default-logging
 
   celery-snapshots-2:
     build: .
@@ -127,6 +139,7 @@ services:
       retries: 3
       start_period: 60s
     restart: unless-stopped
+    logging: *default-logging
 
   celery-beat:
     build: .
@@ -141,6 +154,7 @@ services:
     volumes:
       - .:/app
     restart: unless-stopped
+    logging: *default-logging
 
   websocket-collector:
     build: .
@@ -162,6 +176,32 @@ services:
       retries: 3
       start_period: 60s
     restart: unless-stopped
+    logging: *default-logging
+
+  # === EXECUTOR ===
+  executor:
+    build: .
+    command: python -m src.executor.engine.runner
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/polymarket_ml
+      - REDIS_URL=redis://redis:6379/0
+      - POLYMARKET_PRIVATE_KEY=${POLYMARKET_PRIVATE_KEY:-}
+      - POLYMARKET_FUNDER_ADDRESS=${POLYMARKET_FUNDER_ADDRESS:-}
+      - TRADING_PROXY_URL=${TRADING_PROXY_URL:-}
+      - EXECUTOR_MODE=${EXECUTOR_MODE:-paper}
+      - PAPER_STARTING_BALANCE=${PAPER_STARTING_BALANCE:-10000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+    logging: *default-logging
+    profiles:
+      - executor
 
   # === FRONTEND ===
   frontend:
@@ -171,6 +211,7 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+    logging: *default-logging
 
   # === MONITORING ===
   flower:
@@ -183,6 +224,7 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
+    logging: *default-logging
 
 volumes:
   postgres_data:

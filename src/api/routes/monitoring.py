@@ -339,13 +339,13 @@ async def get_connection_status(db: Session = Depends(get_db)):
     return {
         "timestamp": now.isoformat(),
         "websocket": {
-            "connections": 2,  # Dual connection setup
+            "connections": settings.websocket_num_connections,
             "max_per_connection": 500,
-            "total_capacity": 1000,
+            "total_capacity": settings.websocket_num_connections * 500,
             "markets_subscribed": total_ws_markets,
-            "utilization_pct": round(total_ws_markets / 1000 * 100, 1),
+            "utilization_pct": round(total_ws_markets / (settings.websocket_num_connections * 500) * 100, 1),
             "by_tier": ws_by_tier,
-            "note": "Markets split across 2 WebSocket connections (500 max each)",
+            "note": f"Markets split across {settings.websocket_num_connections} WebSocket connections (500 max each)",
         },
         "database": {
             "status": db_status,
@@ -430,6 +430,162 @@ async def get_monitoring_errors(
             for e in errors
         ],
     }
+
+
+@router.get("/monitoring/critical")
+async def get_critical_health(db: Session = Depends(get_db)):
+    """
+    Critical health check for autonomous operation monitoring.
+
+    Returns HTTP 200 if system is healthy, HTTP 503 if critical issues detected.
+    Designed for external monitoring tools (uptime checks, alerting).
+
+    Checks:
+    - Disk usage < 90%
+    - PostgreSQL connections available
+    - Redis responsive
+    - WebSocket active (trade in last 5 min)
+    - Task success rate > 90% (last 30 min)
+    - Celery queues not backed up (< 500 pending)
+    """
+    import os
+    import redis as redis_sync
+    from src.config.settings import settings
+    from src.db.database import engine
+    from fastapi.responses import JSONResponse
+
+    now = datetime.now(timezone.utc)
+    issues = []
+    warnings = []
+
+    # 1. Check disk usage
+    try:
+        statvfs = os.statvfs('/')
+        disk_used_pct = (1 - statvfs.f_bavail / statvfs.f_blocks) * 100
+        if disk_used_pct > 95:
+            issues.append(f"Disk critically full: {disk_used_pct:.1f}%")
+        elif disk_used_pct > 90:
+            warnings.append(f"Disk usage high: {disk_used_pct:.1f}%")
+    except Exception as e:
+        warnings.append(f"Could not check disk: {str(e)}")
+        disk_used_pct = None
+
+    # 2. Check PostgreSQL connections
+    try:
+        db_pool_size = engine.pool.size()
+        db_pool_checkedout = engine.pool.checkedout()
+        db_pool_overflow = engine.pool.overflow()
+        db_available = db_pool_size - db_pool_checkedout + (20 - db_pool_overflow)  # max_overflow=20
+        if db_available < 3:
+            issues.append(f"DB connections exhausted: {db_pool_checkedout}/{db_pool_size} in use")
+        elif db_available < 5:
+            warnings.append(f"DB connections low: {db_pool_checkedout}/{db_pool_size} in use")
+    except Exception as e:
+        issues.append(f"DB pool check failed: {str(e)}")
+        db_pool_checkedout = None
+        db_pool_size = None
+
+    # 3. Check Redis
+    redis_ok = False
+    redis_memory_mb = None
+    try:
+        r = redis_sync.from_url(settings.redis_url, decode_responses=True, socket_timeout=5)
+        r.ping()
+        info = r.info("memory")
+        redis_memory_mb = info.get("used_memory", 0) / 1024 / 1024
+        if redis_memory_mb > 900:  # 900MB of 1GB limit
+            warnings.append(f"Redis memory high: {redis_memory_mb:.0f}MB")
+        redis_ok = True
+        r.close()
+    except Exception as e:
+        issues.append(f"Redis unreachable: {str(e)}")
+
+    # 4. Check WebSocket (trade activity)
+    five_min_ago = now - timedelta(minutes=5)
+    try:
+        trades_last_5min = db.execute(
+            select(func.count(Trade.id)).where(Trade.timestamp >= five_min_ago)
+        ).scalar() or 0
+        if trades_last_5min == 0:
+            issues.append("No trades in last 5 minutes - WebSocket may be down")
+        elif trades_last_5min < 10:
+            warnings.append(f"Low trade volume: {trades_last_5min} trades in 5 min")
+    except Exception as e:
+        issues.append(f"Trade check failed: {str(e)}")
+        trades_last_5min = None
+
+    # 5. Check task success rate (last 30 min)
+    thirty_min_ago = now - timedelta(minutes=30)
+    try:
+        total_tasks = db.execute(
+            select(func.count(TaskRun.id)).where(TaskRun.started_at >= thirty_min_ago)
+        ).scalar() or 0
+        failed_tasks = db.execute(
+            select(func.count(TaskRun.id)).where(
+                TaskRun.started_at >= thirty_min_ago,
+                TaskRun.status == "failed"
+            )
+        ).scalar() or 0
+
+        if total_tasks > 0:
+            success_rate = (total_tasks - failed_tasks) / total_tasks * 100
+            if success_rate < 80:
+                issues.append(f"Task success rate critical: {success_rate:.1f}%")
+            elif success_rate < 90:
+                warnings.append(f"Task success rate degraded: {success_rate:.1f}%")
+        else:
+            warnings.append("No tasks in last 30 min")
+            success_rate = None
+    except Exception as e:
+        issues.append(f"Task check failed: {str(e)}")
+        success_rate = None
+        total_tasks = None
+        failed_tasks = None
+
+    # 6. Check Celery queue backlog
+    queue_depth = None
+    if redis_ok:
+        try:
+            r = redis_sync.from_url(settings.redis_url, decode_responses=True, socket_timeout=5)
+            queue_depth = r.llen("snapshots") or 0
+            r.close()
+            if queue_depth > 1000:
+                issues.append(f"Celery queue backed up: {queue_depth} pending tasks")
+            elif queue_depth > 500:
+                warnings.append(f"Celery queue growing: {queue_depth} pending tasks")
+        except:
+            pass
+
+    # Determine overall status
+    if issues:
+        status = "critical"
+        http_status = 503
+    elif warnings:
+        status = "warning"
+        http_status = 200
+    else:
+        status = "healthy"
+        http_status = 200
+
+    response = {
+        "timestamp": now.isoformat(),
+        "status": status,
+        "issues": issues,
+        "warnings": warnings,
+        "checks": {
+            "disk_used_pct": round(disk_used_pct, 1) if disk_used_pct else None,
+            "db_connections_used": db_pool_checkedout,
+            "db_pool_size": db_pool_size,
+            "redis_ok": redis_ok,
+            "redis_memory_mb": round(redis_memory_mb, 1) if redis_memory_mb else None,
+            "trades_last_5min": trades_last_5min,
+            "task_success_rate_pct": round(success_rate, 1) if success_rate else None,
+            "tasks_last_30min": total_tasks,
+            "celery_queue_depth": queue_depth,
+        },
+    }
+
+    return JSONResponse(content=response, status_code=http_status)
 
 
 @router.get("/monitoring/field-completeness")
