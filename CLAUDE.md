@@ -37,8 +37,10 @@ Strategy:
 | Tier Transition Tracking | COMPLETE | Dec 19, 2024 |
 | Enhanced Monitoring Dashboard | COMPLETE | Dec 19, 2024 |
 | WebSocket Trade Rate Health | COMPLETE | Dec 19, 2024 |
+| Strategy-as-Code System | COMPLETE | Dec 19, 2024 |
+| Telegram Alerts | COMPLETE | Dec 19, 2024 |
+| Trade Decision Audit Trail | COMPLETE | Dec 19, 2024 |
 | ML Pipeline | NOT STARTED | - |
-| Strategies | NOT STARTED | - |
 
 **Current Phase**: 1 OPERATIONAL - Data collection running at ~100% success rate
 
@@ -109,6 +111,15 @@ docker-compose ps
 | `src/api/routes/database.py` | Database browser API |
 | `frontend/src/pages/Monitoring.tsx` | System monitoring dashboard |
 | `frontend/src/pages/Database.tsx` | Database browser UI |
+| `strategies/base.py` | Strategy base class with SHA tracking |
+| `strategies/longshot_yes_v1.py` | First strategy-as-code example |
+| `cli/deploy.py` | Deploy strategies CLI tool |
+| `cli/status.py` | System status CLI tool |
+| `cli/backtest.py` | Strategy backtesting CLI tool |
+| `deployed_strategies.yaml` | Registry of deployed strategies |
+| `src/alerts/telegram.py` | Telegram alert notifications |
+| `src/executor/models.py` | Executor models (incl. TradeDecision) |
+| `src/tasks/alerts.py` | Daily summary Celery task |
 
 ---
 
@@ -384,6 +395,55 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 
 ---
 
+### Session 9 - Dec 19, 2024 (Strategy-as-Code Refactoring)
+**Goal**: Move strategy configuration from YAML/frontend to Python files. Add Telegram alerts and audit logging.
+
+**Strategy-as-Code System** (`strategies/`):
+- **NEW**: Strategies are now Python files in `strategies/` directory
+- Each strategy is a class inheriting from `Strategy` base class
+- Class attributes = configurable parameters (no YAML needed)
+- `get_sha()` method returns SHA256 of source code for versioning
+- `get_params()` extracts class attributes for display
+- First strategy: `longshot_yes_v1.py` - bets YES on high-probability markets
+
+**CLI Tools** (`cli/`):
+- **NEW**: `python -m cli.deploy strategies/foo.py` - Validates and deploys a strategy
+- **NEW**: `python -m cli.status` - Shows system status, deployed strategies, balance, positions
+- **NEW**: `python -m cli.backtest strategies/foo.py --days 30` - Backtest against historical data
+
+**Trade Decision Audit Trail** (`src/executor/models.py`):
+- **NEW**: `TradeDecision` model captures every signal with full context
+- Fields: strategy_name, strategy_sha, market_snapshot, decision_inputs
+- Fields: signal_side, signal_reason, signal_edge, signal_size_usd
+- Fields: executed, rejected_reason, execution_price, position_id
+- Enables replaying any decision with exact inputs that led to it
+
+**Telegram Alerts** (`src/alerts/telegram.py`):
+- **NEW**: `alert_trade()` - Notifies on executed trades
+- **NEW**: `alert_position_closed()` - Notifies on position close with P&L
+- **NEW**: `alert_error()` - Notifies on critical errors
+- **NEW**: `alert_daily_summary()` - Daily balance/P&L summary at 9 AM UTC
+- Configure via `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` env vars
+
+**Frontend Simplification**:
+- Removed strategy configuration UI (strategies tab, enable/disable, params)
+- Trading page now shows: Balance, P&L, Positions, Signals, Trades, Wallet
+- Strategy management done via CLI, not frontend
+
+**Executor Runner Updates** (`src/executor/engine/runner.py`):
+- Loads strategies from `deployed_strategies.yaml` instead of config.yaml
+- Hot-reload: Detects strategy file changes and reloads
+- Logs every decision to `trade_decisions` table
+- Sends Telegram alerts on trade execution
+
+**Results**:
+- Strategies are now versioned Python files (git-tracked, reviewable)
+- Every trade decision has full audit trail for replay/analysis
+- CLI-based deployment workflow: write → backtest → deploy
+- Telegram notifications for real-time monitoring
+
+---
+
 ## Monitoring Endpoints
 
 | Endpoint | Purpose |
@@ -400,6 +460,76 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 | `GET /api/monitoring/redis-stats` | Redis memory, key counts, ops/sec |
 | `GET /api/database/tables` | List all tables with row counts |
 | `GET /api/database/tables/{name}` | Browse table data with pagination |
+| `GET /api/executor/decisions` | Recent trade decisions with audit info |
+
+---
+
+## Strategy-as-Code Workflow
+
+### Writing a Strategy
+
+Create a Python file in `strategies/` that inherits from `Strategy`:
+
+```python
+# strategies/my_strategy.py
+from strategies.base import Strategy, Signal
+
+class MyStrategy(Strategy):
+    name = "my_strategy"
+    version = "1.0.0"
+
+    # Parameters (class attributes = configurable)
+    min_edge = 0.05
+    max_position_usd = 100
+
+    def scan(self, markets: list[dict]) -> list[Signal]:
+        signals = []
+        for market in markets:
+            if self._should_trade(market):
+                signals.append(Signal(
+                    strategy_name=self.name,
+                    strategy_sha=self.get_sha(),
+                    market_id=market["id"],
+                    side="YES",
+                    reason="My trade reason",
+                    edge=0.10,
+                    size_usd=25,
+                ))
+        return signals
+
+strategy = MyStrategy()  # Required: module-level instance
+```
+
+### CLI Commands
+
+```bash
+# Check system status
+python -m cli.status
+
+# Backtest a strategy
+python -m cli.backtest strategies/my_strategy.py --days 30
+
+# Deploy a strategy (validates + adds to deployed_strategies.yaml)
+python -m cli.deploy strategies/my_strategy.py
+
+# View deployed strategies
+cat deployed_strategies.yaml
+```
+
+### Telegram Alerts Setup
+
+1. Create a Telegram bot via @BotFather
+2. Get your chat ID by messaging @userinfobot
+3. Set environment variables:
+   ```bash
+   TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+   TELEGRAM_CHAT_ID=123456789
+   ```
+4. Alerts sent automatically on:
+   - Trade execution
+   - Position close (with P&L)
+   - Critical errors
+   - Daily summary (9 AM UTC)
 
 ---
 
@@ -414,6 +544,11 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 | task_runs | Task execution history (7-day retention) | varies |
 | tier_transitions | Market tier change tracking (7-day retention) | varies |
 | whale_events | Large trade tracking | - |
+| trade_decisions | Strategy decision audit trail | varies |
+| signals | Trading signals from strategies | varies |
+| positions | Open/closed trading positions | varies |
+| executor_trades | Executed trades | varies |
+| paper_balance | Paper trading balance | 1 |
 
 ---
 
@@ -423,12 +558,13 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 - WebSocket capturing **~380 trades/minute** across 4 connections
 - System hardened for autonomous operation (log rotation, health checks, staggered reconnects)
 - Use `/api/monitoring/critical` for external uptime monitoring (returns 503 on failure)
-- **Disk usage at 70%** - will need to move data to cold storage eventually or add disk space
+- **Strategy-as-Code deployed**: `longshot_yes_v1` enabled in `deployed_strategies.yaml`
+- **Telegram alerts**: Configure `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to enable
 - **Next priorities**:
-  1. Monitor data accumulation over coming days/weeks
-  2. Begin ML pipeline design once sufficient resolved markets exist
-  3. Consider adding alerting for degraded WebSocket status
-  4. May want to add data export functionality for ML training
+  1. Monitor `longshot_yes_v1` strategy performance via trade_decisions table
+  2. Write additional strategies as Python files in `strategies/`
+  3. Begin ML pipeline design once sufficient resolved markets exist
+  4. Consider adding more sophisticated backtesting with slippage simulation
 
 ---
 

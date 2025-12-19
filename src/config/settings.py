@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     websocket_enabled_tiers: list[int] = [2, 3, 4]  # Only T2+ get WS
     websocket_reconnect_delay: float = 5.0
     websocket_max_reconnect_delay: float = 60.0
-    websocket_num_connections: int = 4  # Number of parallel WS connections (500 markets each)
+    websocket_num_connections: int = 6  # Number of parallel WS connections (500 markets each)
 
     # ===========================================
     # Application
@@ -112,6 +112,12 @@ class Settings(BaseSettings):
 
     # Paper trading starting balance
     paper_starting_balance: float = 10000.0
+
+    # ===========================================
+    # Telegram Alerts
+    # ===========================================
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
 
 
 @lru_cache()

@@ -102,6 +102,12 @@ app.conf.beat_schedule = {
         "task": "src.tasks.discovery.cleanup_old_task_runs",
         "schedule": crontab(hour=3, minute=30),  # Daily at 3:30 AM UTC
     },
+    # === ALERTS ===
+    # Daily trading summary at 9 AM UTC
+    "daily-summary": {
+        "task": "src.tasks.alerts.send_daily_summary",
+        "schedule": crontab(hour=9, minute=0),  # Daily at 9:00 AM UTC
+    },
     # === SNAPSHOT TASKS ===
     # Tier 0: > 48h to resolution, hourly snapshots
     "snapshot-tier-0": {
@@ -149,4 +155,4 @@ app.conf.beat_schedule = {
 app.autodiscover_tasks(["src.tasks"])
 
 # Explicitly import to ensure registration
-from src.tasks import discovery, snapshots  # noqa: F401, E402
+from src.tasks import discovery, snapshots, alerts  # noqa: F401, E402

@@ -1,36 +1,27 @@
 """
 Strategy management API endpoints.
 
-Provides endpoints for:
+Provides read-only endpoints for:
 - Listing strategies
-- Enabling/disabling strategies
-- Configuring strategy parameters
+- Getting strategy details and stats
+- Getting strategy signals
+
+Strategy configuration is now done via Python files (strategy-as-code).
+Use the CLI tools: python -m cli.deploy, python -m cli.status
 """
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, Body
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.db.database import get_db
-from src.executor.config import get_config, reload_config, StrategyConfig
+from src.executor.config import get_config
 from src.executor.strategies import get_registry
 from src.executor.models import StrategyState, Signal
 
 router = APIRouter(prefix="/strategies")
-
-
-class StrategyConfigUpdate(BaseModel):
-    """Request body for strategy configuration update."""
-    enabled: Optional[bool] = None
-    params: Optional[dict] = None
-
-
-class StrategyEnableRequest(BaseModel):
-    """Request body for enable/disable."""
-    enabled: bool
 
 
 @router.get("")
@@ -114,86 +105,6 @@ async def get_strategy(
             "order_type": config.execution.default_order_type.value,
             "limit_offset_bps": config.execution.limit_offset_bps,
         } if strategy_config else None,
-    }
-
-
-@router.post("/{strategy_name}/enable")
-async def enable_strategy(
-    strategy_name: str,
-    request: StrategyEnableRequest,
-):
-    """
-    Enable or disable a strategy.
-    """
-    config = get_config()
-    registry = get_registry()
-
-    # Check if strategy exists
-    if registry.get_strategy_class(strategy_name) is None:
-        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_name}' not found")
-
-    # Update config
-    if strategy_name not in config.strategies:
-        config.strategies[strategy_name] = StrategyConfig(
-            enabled=request.enabled,
-            params={},
-        )
-    else:
-        config.strategies[strategy_name].enabled = request.enabled
-
-    # Note: In production, would persist to config.yaml
-
-    return {
-        "success": True,
-        "strategy": strategy_name,
-        "enabled": request.enabled,
-    }
-
-
-@router.post("/{strategy_name}/config")
-async def update_strategy_config(
-    strategy_name: str,
-    update: StrategyConfigUpdate,
-):
-    """
-    Update strategy configuration.
-    """
-    config = get_config()
-    registry = get_registry()
-
-    # Check if strategy exists
-    if registry.get_strategy_class(strategy_name) is None:
-        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_name}' not found")
-
-    # Get or create strategy config
-    if strategy_name not in config.strategies:
-        config.strategies[strategy_name] = StrategyConfig(
-            enabled=False,
-            params={},
-        )
-
-    strategy_config = config.strategies[strategy_name]
-
-    # Update fields
-    if update.enabled is not None:
-        strategy_config.enabled = update.enabled
-    if update.params is not None:
-        strategy_config.params = update.params
-
-    # Reconfigure the strategy instance if it exists
-    strategy = registry.get_or_create_strategy(strategy_name, strategy_config.params)
-    if strategy:
-        strategy.configure(strategy_config.params)
-
-    # Note: In production, would persist to config.yaml
-
-    return {
-        "success": True,
-        "strategy": strategy_name,
-        "config": {
-            "enabled": strategy_config.enabled,
-            "params": strategy_config.params,
-        },
     }
 
 

@@ -12,36 +12,54 @@ Handles:
 Supports SOCKS5 proxy for bypassing IP blocks.
 
 Adapted from futarchy/backend/app/services/polymarket_order_client.py
+
+IMPORTANT: Proxy configuration is deferred to client initialization to avoid
+polluting global environment variables that affect other HTTP clients.
 """
 
 import logging
 import os
 from decimal import Decimal, ROUND_DOWN
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
-# Configure proxy BEFORE importing py_clob_client (which creates httpx client)
 from src.config.settings import settings
-
-_proxy_enabled = False
-if hasattr(settings, 'trading_proxy_url') and settings.trading_proxy_url:
-    os.environ["ALL_PROXY"] = settings.trading_proxy_url
-    os.environ["HTTPS_PROXY"] = settings.trading_proxy_url
-    os.environ["HTTP_PROXY"] = settings.trading_proxy_url
-    _proxy_enabled = True
-
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import (
-    BalanceAllowanceParams,
-    AssetType,
-    OrderArgs,
-)
-from py_clob_client.order_builder.constants import BUY, SELL
 
 logger = logging.getLogger(__name__)
 
-if _proxy_enabled:
-    proxy_host = settings.trading_proxy_url.split('@')[-1] if '@' in settings.trading_proxy_url else settings.trading_proxy_url
-    logger.info(f"Trading proxy configured: {proxy_host}")
+# Type hints only - actual imports deferred to avoid setting proxy at module load
+if TYPE_CHECKING:
+    from py_clob_client.client import ClobClient
+
+# Track if proxy has been configured (done once per process, lazily)
+_proxy_configured = False
+
+
+def _configure_proxy_if_needed():
+    """
+    Configure proxy environment variables before importing py_clob_client.
+
+    This is done lazily (only when client is first created) to avoid
+    polluting the environment for other HTTP clients like Gamma/CLOB fetchers.
+    """
+    global _proxy_configured
+
+    if _proxy_configured:
+        return
+
+    if hasattr(settings, 'trading_proxy_url') and settings.trading_proxy_url:
+        os.environ["ALL_PROXY"] = settings.trading_proxy_url
+        os.environ["HTTPS_PROXY"] = settings.trading_proxy_url
+        os.environ["HTTP_PROXY"] = settings.trading_proxy_url
+        proxy_host = settings.trading_proxy_url.split('@')[-1] if '@' in settings.trading_proxy_url else settings.trading_proxy_url
+        logger.info(f"Trading proxy configured: {proxy_host}")
+
+    _proxy_configured = True
+
+
+def _get_clob_client_class():
+    """Import ClobClient lazily after proxy is configured."""
+    from py_clob_client.client import ClobClient
+    return ClobClient
 
 
 class PolymarketOrderClient:
@@ -71,8 +89,13 @@ class PolymarketOrderClient:
                 "No private key provided. Set POLYMARKET_PRIVATE_KEY in .env or pass to constructor."
             )
 
-        # Proxy is configured at module load time (before py_clob_client import)
-        self.proxy_enabled = _proxy_enabled
+        # Configure proxy BEFORE importing py_clob_client
+        _configure_proxy_if_needed()
+
+        # Now import and create the client
+        ClobClient = _get_clob_client_class()
+
+        self.proxy_enabled = _proxy_configured and bool(getattr(settings, 'trading_proxy_url', ''))
 
         # Initialize client with private key and funder address
         funder = getattr(settings, 'polymarket_funder_address', None)
@@ -111,6 +134,7 @@ class PolymarketOrderClient:
             USDC balance as float
         """
         try:
+            from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
             params = BalanceAllowanceParams(
                 asset_type=AssetType.COLLATERAL,
                 signature_type=self.SIGNATURE_TYPE
@@ -256,6 +280,8 @@ class PolymarketOrderClient:
             )
 
             # Create and post order
+            from py_clob_client.clob_types import OrderArgs
+            from py_clob_client.order_builder.constants import BUY, SELL
             order = self.client.create_and_post_order(
                 OrderArgs(
                     token_id=token_id,

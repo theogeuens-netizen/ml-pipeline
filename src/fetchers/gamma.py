@@ -25,7 +25,7 @@ from src.fetchers.base import BaseClient, SyncBaseClient
 logger = structlog.get_logger()
 
 # Safety limit to prevent infinite pagination loops
-MAX_PAGES = 100  # 100 pages * 100 items = 10,000 markets max
+MAX_PAGES = 500  # 500 pages * 100 items = 50,000 markets max
 
 
 class GammaClient(BaseClient):

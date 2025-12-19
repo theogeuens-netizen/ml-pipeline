@@ -95,6 +95,7 @@ async def _discover_markets_async() -> dict:
         markets_processed = 0
         rows_inserted = 0
         rows_updated = 0
+        seen_condition_ids = set()  # Track condition_ids to avoid duplicates in API response
 
         with get_session() as session:
             for market_data in markets:
@@ -105,6 +106,11 @@ async def _discover_markets_async() -> dict:
 
                 if not condition_id:
                     continue
+
+                # Skip duplicates within this batch (API sometimes returns duplicates)
+                if condition_id in seen_condition_ids:
+                    continue
+                seen_condition_ids.add(condition_id)
 
                 # Volume filter moved to T0→T1 transition (in update_market_tiers)
                 # This allows markets to build volume before being filtered out
@@ -195,6 +201,16 @@ async def _discover_markets_async() -> dict:
                     rows_inserted += 1
 
                 markets_processed += 1
+
+                # Commit in batches to avoid very large transactions
+                if markets_processed % 1000 == 0:
+                    session.commit()
+                    logger.debug(
+                        "Discovery progress",
+                        processed=markets_processed,
+                        new=rows_inserted,
+                        updated=rows_updated,
+                    )
 
             session.commit()
 

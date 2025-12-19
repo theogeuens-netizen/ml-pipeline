@@ -325,3 +325,44 @@ class PaperBalance(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class TradeDecision(Base):
+    """
+    Audit trail for decision replay.
+
+    Records every trading decision with full context for:
+    - Debugging why a trade was made or rejected
+    - Backtesting validation (replay decisions with historical data)
+    - Strategy performance analysis
+    """
+    __tablename__ = "trade_decisions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    # Strategy identification
+    strategy_name: Mapped[str] = mapped_column(String(100), index=True)
+    strategy_sha: Mapped[str] = mapped_column(String(20))  # First 12 chars of SHA256
+
+    # Market identification
+    market_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    condition_id: Mapped[str] = mapped_column(String(100))
+
+    # What the strategy saw (for replay)
+    market_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
+    decision_inputs: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    # The decision made
+    signal_side: Mapped[str] = mapped_column(String(4))  # BUY or SELL
+    signal_reason: Mapped[str] = mapped_column(Text)
+    signal_edge: Mapped[Optional[float]] = mapped_column(Numeric(10, 6))
+    signal_size_usd: Mapped[Optional[float]] = mapped_column(Numeric(20, 2))
+
+    # Outcome
+    executed: Mapped[bool] = mapped_column(Boolean, default=False)
+    rejected_reason: Mapped[Optional[str]] = mapped_column(Text)
+    execution_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 6))
+    position_id: Mapped[Optional[int]] = mapped_column(BigInteger)

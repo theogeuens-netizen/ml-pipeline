@@ -6,9 +6,7 @@ import {
   usePositions,
   useSignals,
   useTrades,
-  useStrategies,
   useClosePosition,
-  useEnableStrategy,
   useSetTradingMode,
   useResetPaperTrading,
   useWalletStatus,
@@ -249,59 +247,6 @@ function TradesTab() {
   )
 }
 
-// Strategies tab
-function StrategiesTab() {
-  const { data, isLoading } = useStrategies()
-  const enableMutation = useEnableStrategy()
-
-  if (isLoading) return <div className="text-gray-400 p-4">Loading strategies...</div>
-
-  const strategies = data?.items || []
-
-  return (
-    <div className="space-y-4 p-4">
-      {strategies.map((strategy) => (
-        <div key={strategy.name} className="bg-gray-700/50 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-white font-medium">{strategy.name}</h3>
-              <p className="text-gray-400 text-sm mt-1">{strategy.description}</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-gray-500 text-sm">v{strategy.version}</span>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={strategy.enabled}
-                  onChange={(e) => enableMutation.mutate({
-                    name: strategy.name,
-                    enabled: e.target.checked
-                  })}
-                  className="sr-only peer"
-                  disabled={enableMutation.isPending}
-                />
-                <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-              </label>
-            </div>
-          </div>
-          {strategy.params && Object.keys(strategy.params).length > 0 && (
-            <div className="mt-3 pt-3 border-t border-gray-600">
-              <h4 className="text-gray-400 text-xs font-medium mb-2">Parameters</h4>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(strategy.params).map(([key, value]) => (
-                  <span key={key} className="px-2 py-1 bg-gray-600 rounded text-xs text-gray-300">
-                    {key}: {String(value)}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
 // Wallet tab (Live Polymarket wallet)
 function WalletTab() {
   const { data: wallet, isLoading, error } = useWalletStatus()
@@ -408,7 +353,7 @@ function WalletTab() {
 
 // Main Trading page
 export default function Trading() {
-  const [activeTab, setActiveTab] = useState<'positions' | 'signals' | 'trades' | 'strategies' | 'wallet'>('positions')
+  const [activeTab, setActiveTab] = useState<'positions' | 'signals' | 'trades' | 'wallet'>('positions')
   const { data: status, isLoading: statusLoading } = useExecutorStatus()
   const setModeMutation = useSetTradingMode()
   const resetMutation = useResetPaperTrading()
@@ -505,9 +450,6 @@ export default function Trading() {
           <TabButton active={activeTab === 'trades'} onClick={() => setActiveTab('trades')}>
             Trades
           </TabButton>
-          <TabButton active={activeTab === 'strategies'} onClick={() => setActiveTab('strategies')}>
-            Strategies
-          </TabButton>
           <TabButton active={activeTab === 'wallet'} onClick={() => setActiveTab('wallet')}>
             Wallet
           </TabButton>
@@ -517,7 +459,6 @@ export default function Trading() {
           {activeTab === 'positions' && <PositionsTab />}
           {activeTab === 'signals' && <SignalsTab />}
           {activeTab === 'trades' && <TradesTab />}
-          {activeTab === 'strategies' && <StrategiesTab />}
           {activeTab === 'wallet' && <WalletTab />}
         </div>
       </div>

@@ -22,6 +22,7 @@ from src.executor.models import (
     ExecutorTrade,
     Position,
     PaperBalance,
+    TradeDecision,
     PositionStatus,
     SignalStatus,
     OrderStatus,
@@ -202,6 +203,43 @@ async def get_signal(
         raise HTTPException(status_code=404, detail="Signal not found")
 
     return _format_signal(signal)
+
+
+@router.get("/decisions")
+async def list_decisions(
+    strategy: Optional[str] = Query(None, description="Filter by strategy name"),
+    executed: Optional[bool] = Query(None, description="Filter by executed status"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """
+    List trade decisions (audit trail) with filtering and pagination.
+
+    Trade decisions record every signal with full context for replay and analysis.
+    """
+    query = select(TradeDecision)
+
+    # Apply filters
+    if strategy:
+        query = query.where(TradeDecision.strategy_name == strategy)
+    if executed is not None:
+        query = query.where(TradeDecision.executed == executed)
+
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total = db.execute(count_query).scalar()
+
+    # Apply pagination and ordering
+    query = query.order_by(desc(TradeDecision.timestamp)).offset(offset).limit(limit)
+    decisions = db.execute(query).scalars().all()
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [_format_decision(d) for d in decisions],
+    }
 
 
 @router.get("/trades")
@@ -560,4 +598,26 @@ def _format_order(o: ExecutorOrder) -> dict:
         "submitted_at": o.submitted_at.isoformat() if o.submitted_at else None,
         "filled_at": o.filled_at.isoformat() if o.filled_at else None,
         "status_message": o.status_message,
+    }
+
+
+def _format_decision(d: TradeDecision) -> dict:
+    """Format trade decision for API response."""
+    return {
+        "id": d.id,
+        "timestamp": d.timestamp.isoformat() if d.timestamp else None,
+        "strategy_name": d.strategy_name,
+        "strategy_sha": d.strategy_sha,
+        "market_id": d.market_id,
+        "condition_id": d.condition_id,
+        "market_snapshot": d.market_snapshot,
+        "decision_inputs": d.decision_inputs,
+        "signal_side": d.signal_side,
+        "signal_reason": d.signal_reason,
+        "signal_edge": float(d.signal_edge) if d.signal_edge else None,
+        "signal_size_usd": float(d.signal_size_usd) if d.signal_size_usd else None,
+        "executed": d.executed,
+        "rejected_reason": d.rejected_reason,
+        "execution_price": float(d.execution_price) if d.execution_price else None,
+        "position_id": d.position_id,
     }
