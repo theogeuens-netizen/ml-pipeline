@@ -33,6 +33,8 @@ logger = structlog.get_logger()
 STALE_THRESHOLD_SECONDS = 120  # Force reconnect if no activity for 2 minutes
 HEALTH_CHECK_INTERVAL_SECONDS = 30  # Check health every 30 seconds
 MAX_SUBSCRIPTIONS = 500  # Polymarket limits to 500 instruments per connection
+MIN_TRADES_PER_MINUTE = 30  # Minimum expected trade rate (trigger reconnect if below)
+RATE_CHECK_WINDOW_SECONDS = 300  # Window for rate calculation (5 minutes)
 
 
 class WebSocketCollector:
@@ -55,6 +57,9 @@ class WebSocketCollector:
         self.last_activity: datetime = datetime.now(timezone.utc)
         self.managed = managed  # If True, skip internal subscription updates
         self.connection_id: int = 0  # Set by MultiConnectionCollector
+        # Trade rate tracking for health monitoring
+        self.trade_timestamps: list[datetime] = []  # Rolling window of trade times
+        self.last_rate_check: datetime = datetime.now(timezone.utc)
 
     async def start(self) -> None:
         """Start the WebSocket collector with automatic reconnection."""
@@ -141,28 +146,74 @@ class WebSocketCollector:
             except Exception as e:
                 logger.error("Subscription update failed", error=str(e))
 
+    def _record_trade(self) -> None:
+        """Record a trade timestamp for rate tracking."""
+        now = datetime.now(timezone.utc)
+        self.trade_timestamps.append(now)
+        # Keep only trades within the rate check window
+        cutoff = now.timestamp() - RATE_CHECK_WINDOW_SECONDS
+        self.trade_timestamps = [t for t in self.trade_timestamps if t.timestamp() > cutoff]
+
+    def get_trade_rate(self) -> float:
+        """Get current trade rate (trades per minute) over the last window."""
+        now = datetime.now(timezone.utc)
+        cutoff = now.timestamp() - RATE_CHECK_WINDOW_SECONDS
+        recent_trades = [t for t in self.trade_timestamps if t.timestamp() > cutoff]
+        if not recent_trades:
+            return 0.0
+        # Calculate rate per minute
+        window_minutes = RATE_CHECK_WINDOW_SECONDS / 60
+        return len(recent_trades) / window_minutes
+
     async def _health_check_loop(self) -> None:
         """Periodically check connection health and force reconnect if stale."""
         while self.running:
             await asyncio.sleep(HEALTH_CHECK_INTERVAL_SECONDS)
             try:
-                seconds_since_activity = (datetime.now(timezone.utc) - self.last_activity).total_seconds()
+                now = datetime.now(timezone.utc)
+                seconds_since_activity = (now - self.last_activity).total_seconds()
 
+                # Check 1: No activity at all (stale connection)
                 if seconds_since_activity > STALE_THRESHOLD_SECONDS:
                     logger.warning(
                         "WebSocket stale, forcing reconnect",
                         seconds_since_activity=int(seconds_since_activity),
                         threshold=STALE_THRESHOLD_SECONDS,
+                        connection=self.connection_id,
                     )
                     if self.ws:
                         await self.ws.close()
-                elif seconds_since_activity > STALE_THRESHOLD_SECONDS / 2:
+                    continue
+
+                # Check 2: Low trade rate (degraded connection)
+                # Only check after initial warmup period (5 minutes)
+                seconds_since_start = (now - self.last_rate_check).total_seconds()
+                if seconds_since_start > RATE_CHECK_WINDOW_SECONDS:
+                    trade_rate = self.get_trade_rate()
+                    if trade_rate < MIN_TRADES_PER_MINUTE and len(self.subscribed_markets) > 100:
+                        logger.warning(
+                            "WebSocket trade rate too low, forcing reconnect",
+                            trade_rate=round(trade_rate, 1),
+                            min_expected=MIN_TRADES_PER_MINUTE,
+                            subscribed_markets=len(self.subscribed_markets),
+                            connection=self.connection_id,
+                        )
+                        # Reset rate tracking
+                        self.trade_timestamps = []
+                        self.last_rate_check = now
+                        if self.ws:
+                            await self.ws.close()
+                        continue
+
+                # Warning: activity is low but not critical
+                if seconds_since_activity > STALE_THRESHOLD_SECONDS / 2:
                     logger.warning(
                         "WebSocket activity low",
                         seconds_since_activity=int(seconds_since_activity),
+                        connection=self.connection_id,
                     )
             except Exception as e:
-                logger.error("Health check failed", error=str(e))
+                logger.error("Health check failed", error=str(e), connection=self.connection_id)
 
     async def _update_subscriptions(self) -> None:
         """Subscribe to markets in T2+ tiers, prioritizing by tier (T4 first).
@@ -438,6 +489,9 @@ class WebSocketCollector:
         except Exception as e:
             logger.warning("Redis trade push failed", error=str(e), market_id=market_id)
 
+        # Track trade for rate monitoring
+        self._record_trade()
+
         logger.debug(
             "Trade recorded",
             market=condition_id[:20] if condition_id else "unknown",
@@ -661,17 +715,41 @@ class MultiConnectionCollector:
         while self.running:
             await asyncio.sleep(300)  # Every 5 minutes
             try:
+                # Track old subscriptions before reassignment
+                old_subscriptions: dict[int, set[str]] = {
+                    i: set(collector.subscribed_markets.keys())
+                    for i, collector in enumerate(self.collectors)
+                }
+
                 await self._assign_markets_to_connections()
-                # Trigger subscription updates on all collectors
-                for collector in self.collectors:
+
+                # Update subscriptions on all collectors
+                for i, collector in enumerate(self.collectors):
                     if collector.ws:
-                        # Re-subscribe with new assignments
-                        batch = [
-                            (cid, info["yes_token_id"])
-                            for cid, info in collector.subscribed_markets.items()
-                        ]
-                        if batch:
+                        new_subs = set(collector.subscribed_markets.keys())
+                        old_subs = old_subscriptions.get(i, set())
+
+                        # Unsubscribe from removed markets (update Redis tracking)
+                        removed = old_subs - new_subs
+                        for cid in removed:
+                            await collector._unsubscribe(cid)
+
+                        # Subscribe to new markets only
+                        added = new_subs - old_subs
+                        if added:
+                            batch = [
+                                (cid, collector.subscribed_markets[cid]["yes_token_id"])
+                                for cid in added
+                            ]
                             await collector._subscribe_batch(batch)
+
+                        logger.info(
+                            "Reassignment complete",
+                            connection=i,
+                            added=len(added),
+                            removed=len(removed),
+                            total=len(new_subs),
+                        )
             except Exception as e:
                 logger.error("Market reassignment failed", error=str(e))
 

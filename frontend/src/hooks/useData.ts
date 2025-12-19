@@ -108,6 +108,30 @@ export function useConnectionStatus() {
   })
 }
 
+export function useTierTransitions(hours = 1) {
+  return useQuery({
+    queryKey: ['tierTransitions', hours],
+    queryFn: () => api.getTierTransitions(hours),
+    refetchInterval: 10000,
+  })
+}
+
+export function useTaskActivity(limit = 50) {
+  return useQuery({
+    queryKey: ['taskActivity', limit],
+    queryFn: () => api.getTaskActivity(limit),
+    refetchInterval: 5000,
+  })
+}
+
+export function useRedisStats() {
+  return useQuery({
+    queryKey: ['redisStats'],
+    queryFn: api.getRedisStats,
+    refetchInterval: 10000,
+  })
+}
+
 // Database browser hooks
 export function useTables() {
   return useQuery({

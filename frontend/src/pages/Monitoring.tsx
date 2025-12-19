@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMonitoringHealth, useMonitoringErrors, useFieldCompleteness, useWebSocketCoverage, useSubscriptionHealth, useConnectionStatus } from '../hooks/useData'
+import { useMonitoringHealth, useMonitoringErrors, useFieldCompleteness, useWebSocketCoverage, useSubscriptionHealth, useConnectionStatus, useTierTransitions, useTaskActivity, useRedisStats } from '../hooks/useData'
 import { clsx } from 'clsx'
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -20,6 +20,9 @@ export default function Monitoring() {
   const { data: wsCoverage } = useWebSocketCoverage()
   const { data: subHealth } = useSubscriptionHealth()
   const { data: connStatus } = useConnectionStatus()
+  const { data: tierTransitions } = useTierTransitions(1)
+  const { data: taskActivity } = useTaskActivity(30)
+  const { data: redisStats } = useRedisStats()
   const [selectedError, setSelectedError] = useState<number | null>(null)
 
   if (healthLoading || completenessLoading) {
@@ -279,6 +282,136 @@ export default function Monitoring() {
           </div>
         </div>
       )}
+
+      {/* Tier Transitions, Task Activity, Redis Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Tier Transitions */}
+        <div className="bg-gray-800 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">Tier Flow (1h)</h2>
+            <span className="text-gray-400 text-sm">{tierTransitions?.total_transitions || 0} transitions</span>
+          </div>
+          {tierTransitions ? (
+            <div className="space-y-2">
+              {Object.entries(tierTransitions.summary).length > 0 ? (
+                Object.entries(tierTransitions.summary)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([key, count]) => (
+                    <div key={key} className="flex justify-between text-sm">
+                      <span className={clsx(
+                        'font-mono',
+                        key.includes('deactivated') ? 'text-red-400' : 'text-blue-400'
+                      )}>{key}</span>
+                      <span className="text-white font-medium">{count}</span>
+                    </div>
+                  ))
+              ) : (
+                <div className="text-gray-500 text-sm">No tier changes in last hour</div>
+              )}
+              {tierTransitions.recent.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-gray-700">
+                  <div className="text-xs text-gray-400 mb-2">Recent:</div>
+                  {tierTransitions.recent.slice(0, 3).map((t, idx) => (
+                    <div key={idx} className="text-xs text-gray-300 truncate">
+                      T{t.from_tier}→{t.to_tier === -1 ? 'off' : `T${t.to_tier}`}: {t.market}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-gray-400 text-sm">Loading...</div>
+          )}
+        </div>
+
+        {/* Task Activity */}
+        <div className="bg-gray-800 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">Task Activity</h2>
+          </div>
+          {taskActivity ? (
+            <div className="space-y-2">
+              {Object.entries(taskActivity.by_task).map(([task, stats]) => (
+                <div key={task} className="flex items-center justify-between text-sm">
+                  <span className="text-gray-300 font-mono truncate flex-1">{task}</span>
+                  <div className="flex items-center gap-2 ml-2">
+                    <span className="text-green-400">{stats.success}</span>
+                    {stats.failed > 0 && <span className="text-red-400">{stats.failed}</span>}
+                    {stats.running > 0 && <span className="text-yellow-400">{stats.running}</span>}
+                  </div>
+                </div>
+              ))}
+              {taskActivity.recent.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-gray-700 max-h-32 overflow-y-auto">
+                  <div className="text-xs text-gray-400 mb-2">Recent:</div>
+                  {taskActivity.recent.slice(0, 5).map((t) => (
+                    <div key={t.id} className="text-xs flex items-center gap-2 mb-1">
+                      <span className={clsx(
+                        'w-2 h-2 rounded-full',
+                        t.status === 'success' ? 'bg-green-500' : t.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'
+                      )} />
+                      <span className="text-gray-300">{t.task}</span>
+                      {t.tier !== null && <span className="text-gray-500">T{t.tier}</span>}
+                      {t.duration_ms && <span className="text-gray-500">{t.duration_ms}ms</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-gray-400 text-sm">Loading...</div>
+          )}
+        </div>
+
+        {/* Redis Stats */}
+        <div className="bg-gray-800 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">Redis Stats</h2>
+          </div>
+          {redisStats ? (
+            <div className="space-y-3">
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-gray-400">Memory</span>
+                  <span className="text-white">{redisStats.memory_used_mb}MB / {redisStats.memory_peak_mb}MB peak</span>
+                </div>
+                <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className={clsx(
+                      'h-full',
+                      redisStats.memory_used_mb < 500 ? 'bg-green-500' : 'bg-yellow-500'
+                    )}
+                    style={{ width: `${Math.min(100, (redisStats.memory_used_mb / 1024) * 100)}%` }}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Total Keys</span>
+                <span className="text-white">{redisStats.total_keys}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Ops/sec</span>
+                <span className="text-white">{redisStats.ops_per_sec}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Clients</span>
+                <span className="text-white">{redisStats.connected_clients}</span>
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-700">
+                <div className="text-xs text-gray-400 mb-2">Keys by pattern:</div>
+                {Object.entries(redisStats.keys_by_pattern).map(([pattern, count]) => (
+                  <div key={pattern} className="flex justify-between text-xs mb-1">
+                    <span className="text-gray-500 font-mono">{pattern}</span>
+                    <span className="text-gray-300">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="text-gray-400 text-sm">Loading...</div>
+          )}
+        </div>
+      </div>
 
       {/* Field Completeness by Category */}
       <div className="bg-gray-800 rounded-lg p-6">

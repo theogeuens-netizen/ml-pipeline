@@ -675,3 +675,141 @@ async def get_field_completeness(db: Session = Depends(get_db)):
         "by_category": by_category,
         "by_tier": by_tier,
     }
+
+
+@router.get("/monitoring/tier-transitions")
+async def get_tier_transitions(
+    hours: int = Query(1, ge=1, le=24),
+    db: Session = Depends(get_db),
+):
+    """
+    Get tier transitions in the last N hours.
+
+    Shows markets moving between tiers (T0→T1, T1→T2, etc.)
+    and markets being deactivated (-1 represents deactivated).
+    """
+    from src.db.models import TierTransition
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    # Summary by transition type
+    transitions = db.execute(
+        select(
+            TierTransition.from_tier,
+            TierTransition.to_tier,
+            func.count(TierTransition.id).label("count")
+        )
+        .where(TierTransition.transitioned_at >= cutoff)
+        .group_by(TierTransition.from_tier, TierTransition.to_tier)
+    ).all()
+
+    # Format as "T0→T1": count
+    summary = {}
+    for row in transitions:
+        from_label = f"T{row[0]}" if row[0] >= 0 else "new"
+        to_label = f"T{row[1]}" if row[1] >= 0 else "deactivated"
+        key = f"{from_label}→{to_label}"
+        summary[key] = row[2]
+
+    # Recent transitions list
+    recent = db.execute(
+        select(TierTransition)
+        .where(TierTransition.transitioned_at >= cutoff)
+        .order_by(TierTransition.transitioned_at.desc())
+        .limit(50)
+    ).scalars().all()
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "period_hours": hours,
+        "summary": summary,
+        "total_transitions": sum(summary.values()),
+        "recent": [
+            {
+                "market": t.market_slug[:40] if t.market_slug else t.condition_id[:20],
+                "from_tier": t.from_tier,
+                "to_tier": t.to_tier,
+                "at": t.transitioned_at.isoformat(),
+                "hours_to_close": float(t.hours_to_close) if t.hours_to_close else None,
+                "reason": t.reason,
+            }
+            for t in recent
+        ],
+    }
+
+
+@router.get("/monitoring/task-activity")
+async def get_task_activity(
+    limit: int = Query(50, ge=10, le=200),
+    db: Session = Depends(get_db),
+):
+    """
+    Get recent Celery task executions with summary by task type.
+    """
+    tasks = db.execute(
+        select(TaskRun)
+        .order_by(TaskRun.started_at.desc())
+        .limit(limit)
+    ).scalars().all()
+
+    # Group by task type for summary
+    by_task: dict = {}
+    for t in tasks:
+        name = t.task_name.split(".")[-1] if t.task_name else "unknown"
+        if name not in by_task:
+            by_task[name] = {"success": 0, "failed": 0, "running": 0}
+        by_task[name][t.status] = by_task[name].get(t.status, 0) + 1
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "by_task": by_task,
+        "recent": [
+            {
+                "id": t.id,
+                "task": t.task_name.split(".")[-1] if t.task_name else "unknown",
+                "tier": t.tier,
+                "status": t.status,
+                "started_at": t.started_at.isoformat() if t.started_at else None,
+                "duration_ms": t.duration_ms,
+                "markets_processed": t.markets_processed,
+                "rows_inserted": t.rows_inserted,
+                "error": t.error_message[:100] if t.error_message else None,
+            }
+            for t in tasks
+        ],
+    }
+
+
+@router.get("/monitoring/redis-stats")
+async def get_redis_stats():
+    """
+    Get Redis memory, key counts, and connection info.
+    """
+    import redis as redis_sync
+    from src.config.settings import settings
+
+    r = redis_sync.from_url(settings.redis_url, decode_responses=True)
+    try:
+        info = r.info()
+
+        # Count keys by pattern
+        key_patterns = {
+            "ws:*": len(r.keys("ws:*")),
+            "gamma:*": len(r.keys("gamma:*")),
+            "orderbook:*": len(r.keys("orderbook:*")),
+            "trade_buffer:*": len(r.keys("trade_buffer:*")),
+            "celery*": len(r.keys("celery*")),
+        }
+
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "memory_used_mb": round(info.get("used_memory", 0) / 1024 / 1024, 1),
+            "memory_peak_mb": round(info.get("used_memory_peak", 0) / 1024 / 1024, 1),
+            "connected_clients": info.get("connected_clients", 0),
+            "total_keys": r.dbsize(),
+            "keys_by_pattern": key_patterns,
+            "uptime_seconds": info.get("uptime_in_seconds", 0),
+            "ops_per_sec": info.get("instantaneous_ops_per_sec", 0),
+        }
+    finally:
+        r.close()

@@ -8,6 +8,7 @@ Tables:
 - orderbook_snapshots: Full orderbook storage
 - whale_events: Whale trade tracking with impact
 - task_runs: Celery task execution logging
+- tier_transitions: Market tier change tracking for monitoring
 """
 
 from datetime import datetime
@@ -102,6 +103,7 @@ class Market(Base):
     trades: Mapped[list["Trade"]] = relationship(back_populates="market")
     orderbook_snapshots: Mapped[list["OrderbookSnapshot"]] = relationship(back_populates="market")
     whale_events: Mapped[list["WhaleEvent"]] = relationship(back_populates="market")
+    tier_transitions: Mapped[list["TierTransition"]] = relationship(back_populates="market")
 
 
 class Snapshot(Base):
@@ -296,3 +298,26 @@ class TaskRun(Base):
 
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     error_traceback: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class TierTransition(Base):
+    """
+    Track market tier changes for monitoring dashboard.
+
+    Records every tier transition (T0→T1, T1→T2, etc.) for visibility
+    into market lifecycle and system activity. Retained for 7 days.
+    """
+    __tablename__ = "tier_transitions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market_id: Mapped[int] = mapped_column(ForeignKey("markets.id"), index=True)
+    condition_id: Mapped[str] = mapped_column(String(100))
+    market_slug: Mapped[Optional[str]] = mapped_column(String(255))
+    from_tier: Mapped[int] = mapped_column(SmallInteger)
+    to_tier: Mapped[int] = mapped_column(SmallInteger)  # -1 indicates deactivated
+    transitioned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    hours_to_close: Mapped[Optional[float]] = mapped_column(Numeric(10, 4))
+    reason: Mapped[Optional[str]] = mapped_column(String(50))  # "time", "deactivated", "resolved", etc.
+
+    # Relationship
+    market: Mapped["Market"] = relationship(back_populates="tier_transitions")

@@ -167,6 +167,17 @@ def snapshot_tier(self, tier: int) -> dict:
                 if m.get("conditionId") in market_ids
             ]
 
+            # Log if markets are missing from gamma cache (indicates stale DB data)
+            cache_condition_ids = {m.get("conditionId") for m in all_markets}
+            missing_from_cache = set(market_ids.keys()) - cache_condition_ids
+            if missing_from_cache:
+                logger.warning(
+                    "Markets in DB but not in gamma cache",
+                    tier=tier,
+                    missing_count=len(missing_from_cache),
+                    sample_missing=list(missing_from_cache)[:3],
+                )
+
             now = datetime.now(timezone.utc)
 
             # === PARALLEL ORDERBOOK FETCHING (with Redis cache priority) ===
@@ -480,6 +491,17 @@ def snapshot_tier_batch(self, tier: int, batch: int, total_batches: int = 2) -> 
                 m for m in all_gamma_markets
                 if m.get("conditionId") in market_ids
             ]
+
+            # Log if markets are missing from gamma cache
+            cache_condition_ids = {m.get("conditionId") for m in all_gamma_markets}
+            missing_from_cache = set(market_ids.keys()) - cache_condition_ids
+            if missing_from_cache:
+                logger.warning(
+                    "Markets in DB but not in gamma cache (batch)",
+                    tier=tier,
+                    batch=batch,
+                    missing_count=len(missing_from_cache),
+                )
 
             now = datetime.now(timezone.utc)
 

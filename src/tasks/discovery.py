@@ -17,7 +17,7 @@ import structlog
 
 from src.config.settings import settings
 from src.db.database import get_session
-from src.db.models import Market, TaskRun
+from src.db.models import Market, TaskRun, TierTransition
 from src.fetchers.gamma import GammaClient
 
 logger = structlog.get_logger()
@@ -184,6 +184,7 @@ async def _discover_markets_async() -> dict:
                         # Collection tracking
                         tier=tier,
                         active=market_data.get("active", True),
+                        tracking_started_at=datetime.now(timezone.utc),  # Set when first discovered
                         # Metadata
                         category=market_data.get("category"),
                         neg_risk=market_data.get("negRisk", False),
@@ -251,14 +252,30 @@ def update_market_tiers() -> dict:
             updated = 0
             deactivated = 0
             tier_counts = {i: 0 for i in range(5)}
+            now = datetime.now(timezone.utc)
 
             for market in markets:
                 new_tier = calculate_tier(market.end_date)
+                hours_to_close = None
+                if market.end_date:
+                    hours_to_close = (market.end_date - now).total_seconds() / 3600
 
                 # Volume filter at T0→T1 transition
                 if market.tier == 0 and new_tier >= 1:
                     volume_24h = volume_by_condition.get(market.condition_id, 0)
                     if volume_24h < settings.ml_volume_threshold:
+                        # Record deactivation as tier transition
+                        transition = TierTransition(
+                            market_id=market.id,
+                            condition_id=market.condition_id,
+                            market_slug=market.slug,
+                            from_tier=market.tier,
+                            to_tier=-1,
+                            transitioned_at=now,
+                            hours_to_close=hours_to_close,
+                            reason="low_volume",
+                        )
+                        session.add(transition)
                         # Deactivate low-volume market instead of promoting
                         market.active = False
                         deactivated += 1
@@ -273,6 +290,18 @@ def update_market_tiers() -> dict:
                 tier_counts[new_tier] += 1
 
                 if market.tier != new_tier:
+                    # Record tier transition
+                    transition = TierTransition(
+                        market_id=market.id,
+                        condition_id=market.condition_id,
+                        market_slug=market.slug,
+                        from_tier=market.tier,
+                        to_tier=new_tier,
+                        transitioned_at=now,
+                        hours_to_close=hours_to_close,
+                        reason="time",
+                    )
+                    session.add(transition)
                     logger.debug(
                         "Tier change",
                         market=market.slug,
@@ -383,11 +412,13 @@ def check_resolutions() -> dict:
 @shared_task(name="src.tasks.discovery.cleanup_stale_markets")
 def cleanup_stale_markets() -> dict:
     """
-    Deactivate stale T4 markets that are dead or expired.
+    Deactivate stale markets that are resolved, dead, expired, or delisted.
 
-    A T4 market is considered stale if:
-    1. end_date is more than 1 hour in the past (expired/unresolved)
-    2. No trades received in the last hour (dead market)
+    Markets are deactivated if:
+    1. resolved == True (market has ended)
+    2. end_date is more than 1 hour in the past and unresolved (expired)
+    3. T4 market with no trades in the last hour (dead market)
+    4. Market no longer in Gamma API (delisted/removed)
 
     These markets are deactivated to:
     - Free up WebSocket subscription slots (limited to 500)
@@ -395,23 +426,61 @@ def cleanup_stale_markets() -> dict:
     - Keep the system focused on active markets
 
     Returns:
-        Dictionary with deactivated_expired and deactivated_no_trades counts
+        Dictionary with deactivation counts by reason
     """
     from sqlalchemy import func, text
+    from src.db.redis import SyncRedisClient
 
     from datetime import timedelta
 
     now = datetime.now(timezone.utc)
     one_hour_ago = now - timedelta(hours=1)
 
+    deactivated_resolved = 0
     deactivated_expired = 0
     deactivated_no_trades = 0
+    deactivated_missing_from_api = 0
+
+    # Get gamma cache to check if markets still exist in API
+    redis_client = SyncRedisClient()
+    gamma_cache = redis_client.get_gamma_markets_cache() or []
+    gamma_condition_ids = {m.get("conditionId") for m in gamma_cache}
+    redis_client.close()
 
     with get_session() as session:
-        # 1. Deactivate T4 markets with end_date > 1 hour in the past
+        # 1. Deactivate all resolved markets (highest priority cleanup)
+        resolved_markets = session.execute(
+            select(Market).where(
+                Market.active == True,
+                Market.resolved == True,
+            )
+        ).scalars().all()
+
+        for market in resolved_markets:
+            # Record deactivation as tier transition
+            transition = TierTransition(
+                market_id=market.id,
+                condition_id=market.condition_id,
+                market_slug=market.slug,
+                from_tier=market.tier,
+                to_tier=-1,
+                transitioned_at=now,
+                hours_to_close=None,
+                reason="resolved",
+            )
+            session.add(transition)
+            market.active = False
+            deactivated_resolved += 1
+
+        if deactivated_resolved > 0:
+            logger.info(
+                "Deactivated resolved markets",
+                count=deactivated_resolved,
+            )
+
+        # 2. Deactivate unresolved markets with end_date > 1 hour in the past
         expired_markets = session.execute(
             select(Market).where(
-                Market.tier == 4,
                 Market.active == True,
                 Market.resolved == False,
                 Market.end_date < one_hour_ago,
@@ -419,15 +488,27 @@ def cleanup_stale_markets() -> dict:
         ).scalars().all()
 
         for market in expired_markets:
+            # Record deactivation as tier transition
+            transition = TierTransition(
+                market_id=market.id,
+                condition_id=market.condition_id,
+                market_slug=market.slug,
+                from_tier=market.tier,
+                to_tier=-1,
+                transitioned_at=now,
+                hours_to_close=None,
+                reason="expired",
+            )
+            session.add(transition)
             market.active = False
             deactivated_expired += 1
             logger.info(
-                "Deactivated expired T4 market",
+                "Deactivated expired market",
                 market=market.slug,
                 end_date=market.end_date.isoformat() if market.end_date else None,
             )
 
-        # 2. Deactivate T4 markets with no trades in last hour
+        # 3. Deactivate T4 markets with no trades in last hour
         # Get T4 markets that have been tracked for at least 1 hour
         t4_markets = session.execute(
             select(Market).where(
@@ -450,6 +531,18 @@ def cleanup_stale_markets() -> dict:
             ).scalar()
 
             if trade_count == 0:
+                # Record deactivation as tier transition
+                transition = TierTransition(
+                    market_id=market.id,
+                    condition_id=market.condition_id,
+                    market_slug=market.slug,
+                    from_tier=market.tier,
+                    to_tier=-1,
+                    transitioned_at=now,
+                    hours_to_close=None,
+                    reason="no_trades",
+                )
+                session.add(transition)
                 market.active = False
                 deactivated_no_trades += 1
                 logger.info(
@@ -457,29 +550,65 @@ def cleanup_stale_markets() -> dict:
                     market=market.slug,
                 )
 
+        # 4. Deactivate markets no longer in Gamma API (only if cache is populated)
+        if gamma_condition_ids:
+            # Get all active unresolved markets
+            active_markets = session.execute(
+                select(Market).where(
+                    Market.active == True,
+                    Market.resolved == False,
+                )
+            ).scalars().all()
+
+            for market in active_markets:
+                if market.condition_id not in gamma_condition_ids:
+                    # Record deactivation as tier transition
+                    transition = TierTransition(
+                        market_id=market.id,
+                        condition_id=market.condition_id,
+                        market_slug=market.slug,
+                        from_tier=market.tier,
+                        to_tier=-1,
+                        transitioned_at=now,
+                        hours_to_close=None,
+                        reason="delisted",
+                    )
+                    session.add(transition)
+                    market.active = False
+                    deactivated_missing_from_api += 1
+                    logger.info(
+                        "Deactivated market (missing from Gamma API)",
+                        market=market.slug,
+                        condition_id=market.condition_id[:16],
+                    )
+
         session.commit()
 
     logger.info(
         "Stale market cleanup complete",
+        deactivated_resolved=deactivated_resolved,
         deactivated_expired=deactivated_expired,
         deactivated_no_trades=deactivated_no_trades,
+        deactivated_missing_from_api=deactivated_missing_from_api,
     )
     return {
+        "deactivated_resolved": deactivated_resolved,
         "deactivated_expired": deactivated_expired,
         "deactivated_no_trades": deactivated_no_trades,
+        "deactivated_missing_from_api": deactivated_missing_from_api,
     }
 
 
 @shared_task(name="src.tasks.discovery.cleanup_old_task_runs")
 def cleanup_old_task_runs() -> dict:
     """
-    Delete old task_runs records to prevent unbounded table growth.
+    Delete old task_runs and tier_transitions records to prevent unbounded table growth.
 
     This is operational/diagnostic data, NOT market data.
-    Keeps last 7 days of task runs for debugging purposes.
+    Keeps last 7 days of records for debugging purposes.
 
     Returns:
-        Dictionary with deleted count
+        Dictionary with deleted counts
     """
     from datetime import timedelta
 
@@ -487,24 +616,40 @@ def cleanup_old_task_runs() -> dict:
 
     with get_session() as session:
         # Count before delete for reporting
-        old_count = session.execute(
+        old_task_runs = session.execute(
             select(func.count(TaskRun.id)).where(TaskRun.started_at < cutoff)
         ).scalar() or 0
 
-        if old_count > 0:
-            # Delete old records
+        old_transitions = session.execute(
+            select(func.count(TierTransition.id)).where(TierTransition.transitioned_at < cutoff)
+        ).scalar() or 0
+
+        if old_task_runs > 0:
+            # Delete old task_runs records
             session.execute(
                 TaskRun.__table__.delete().where(TaskRun.started_at < cutoff)
             )
-            session.commit()
 
+        if old_transitions > 0:
+            # Delete old tier_transitions records
+            session.execute(
+                TierTransition.__table__.delete().where(TierTransition.transitioned_at < cutoff)
+            )
+
+        if old_task_runs > 0 or old_transitions > 0:
+            session.commit()
             logger.info(
-                "Cleaned up old task_runs",
-                deleted=old_count,
+                "Cleaned up old records",
+                task_runs_deleted=old_task_runs,
+                tier_transitions_deleted=old_transitions,
                 cutoff=cutoff.isoformat(),
             )
 
-    return {"deleted": old_count, "cutoff": cutoff.isoformat()}
+    return {
+        "task_runs_deleted": old_task_runs,
+        "tier_transitions_deleted": old_transitions,
+        "cutoff": cutoff.isoformat(),
+    }
 
 
 # === Task Run Tracking ===

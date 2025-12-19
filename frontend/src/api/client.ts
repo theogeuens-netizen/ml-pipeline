@@ -211,6 +211,50 @@ export interface ConnectionStatus {
   }
 }
 
+export interface TierTransition {
+  market: string
+  from_tier: number
+  to_tier: number
+  at: string
+  hours_to_close: number | null
+  reason: string | null
+}
+
+export interface TierTransitions {
+  timestamp: string
+  period_hours: number
+  summary: Record<string, number>
+  total_transitions: number
+  recent: TierTransition[]
+}
+
+export interface TaskActivity {
+  timestamp: string
+  by_task: Record<string, { success: number; failed: number; running: number }>
+  recent: {
+    id: number
+    task: string
+    tier: number | null
+    status: string
+    started_at: string | null
+    duration_ms: number | null
+    markets_processed: number | null
+    rows_inserted: number | null
+    error: string | null
+  }[]
+}
+
+export interface RedisStats {
+  timestamp: string
+  memory_used_mb: number
+  memory_peak_mb: number
+  connected_clients: number
+  total_keys: number
+  keys_by_pattern: Record<string, number>
+  uptime_seconds: number
+  ops_per_sec: number
+}
+
 // Executor types
 export interface ExecutorStatus {
   mode: 'paper' | 'live'
@@ -494,6 +538,9 @@ export const api = {
   getWebSocketCoverage: () => fetchJson<WebSocketCoverage>('/api/monitoring/websocket-coverage'),
   getSubscriptionHealth: () => fetchJson<SubscriptionHealth>('/api/monitoring/subscription-health'),
   getConnectionStatus: () => fetchJson<ConnectionStatus>('/api/monitoring/connections'),
+  getTierTransitions: (hours = 1) => fetchJson<TierTransitions>(`/api/monitoring/tier-transitions?hours=${hours}`),
+  getTaskActivity: (limit = 50) => fetchJson<TaskActivity>(`/api/monitoring/task-activity?limit=${limit}`),
+  getRedisStats: () => fetchJson<RedisStats>('/api/monitoring/redis-stats'),
 
   // Database browser endpoints
   getTables: () => fetchJson<{ tables: TableInfo[] }>('/api/database/tables'),
