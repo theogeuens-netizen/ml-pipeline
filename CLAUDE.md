@@ -34,6 +34,9 @@ Strategy:
 | Monitoring Dashboard | COMPLETE | Dec 17, 2024 |
 | Database Browser | COMPLETE | Dec 17, 2024 |
 | Orderbook Snapshots | COMPLETE | Dec 17, 2024 |
+| Tier Transition Tracking | COMPLETE | Dec 19, 2024 |
+| Enhanced Monitoring Dashboard | COMPLETE | Dec 19, 2024 |
+| WebSocket Trade Rate Health | COMPLETE | Dec 19, 2024 |
 | ML Pipeline | NOT STARTED | - |
 | Strategies | NOT STARTED | - |
 
@@ -98,6 +101,7 @@ docker-compose ps
 | `src/tasks/discovery.py` | Market discovery and tier assignment |
 | `src/tasks/celery_app.py` | Celery configuration and beat schedule |
 | `src/collectors/websocket.py` | WebSocket trade collector with health checks |
+| `src/collectors/healthcheck.py` | WebSocket container health check module |
 | `src/fetchers/gamma.py` | Gamma API client (sync + async) |
 | `src/fetchers/clob.py` | CLOB API client (sync + async) |
 | `src/db/redis.py` | Redis client with activity tracking |
@@ -341,6 +345,45 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 
 ---
 
+### Session 8 - Dec 19, 2024 (Tier Transition Tracking & Monitoring Enhancements)
+**Goal**: Add visibility into market lifecycle transitions and enhance monitoring dashboard
+
+**New Features**:
+
+**Tier Transition Tracking** (`src/db/models.py`, `src/tasks/discovery.py`):
+- **NEW**: `TierTransition` model tracks every tier change (T0→T1, T1→T2, deactivation, etc.)
+- Records reason: `time`, `low_volume`, `resolved`, `expired`, `no_trades`, `delisted`
+- Captures `hours_to_close` at transition for analysis
+- 7-day retention with automatic cleanup (runs with `cleanup_old_task_runs`)
+
+**Enhanced Market Cleanup** (`src/tasks/discovery.py`):
+- `cleanup_stale_markets` now deactivates all market types, not just T4:
+  - Resolved markets (highest priority)
+  - Expired markets (end_date > 1 hour past)
+  - T4 with no trades in 1 hour
+  - Markets missing from Gamma API (delisted)
+- All deactivations logged as tier transitions for visibility
+
+**WebSocket Trade Rate Health** (`src/collectors/websocket.py`, `src/collectors/healthcheck.py`):
+- **NEW**: Trade rate monitoring with `MIN_TRADES_PER_MINUTE=30` threshold
+- Auto-reconnect if rate falls below minimum after 5-min warmup
+- **NEW**: `healthcheck.py` module for Docker container health checks
+- Updated `docker-compose.yml` with 10-min start_period for warmup
+
+**Enhanced Monitoring Dashboard** (`frontend/src/pages/Monitoring.tsx`):
+- **NEW**: 3-column monitoring panel:
+  - **Tier Flow**: Transitions in last hour (T0→T1: 5, T3→deactivated: 2, etc.)
+  - **Task Activity**: Celery task success/failure summary by task type
+  - **Redis Stats**: Memory usage, key counts, ops/sec
+- 3 new API endpoints: `/monitoring/tier-transitions`, `/monitoring/task-activity`, `/monitoring/redis-stats`
+
+**Results**:
+- Full visibility into market lifecycle (discovery → tier progression → deactivation)
+- Proactive WebSocket health monitoring with auto-recovery
+- Enhanced dashboard shows system internals at a glance
+
+---
+
 ## Monitoring Endpoints
 
 | Endpoint | Purpose |
@@ -352,6 +395,9 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 | `GET /api/monitoring/connections` | DB pool, Redis, WebSocket connection details |
 | `GET /api/monitoring/field-completeness` | Field population % by category/tier |
 | `GET /api/monitoring/errors?limit=50` | Recent task errors with tracebacks |
+| `GET /api/monitoring/tier-transitions?hours=1` | Tier flow visualization (T0→T1, deactivations) |
+| `GET /api/monitoring/task-activity?limit=50` | Celery task success/failure summary |
+| `GET /api/monitoring/redis-stats` | Redis memory, key counts, ops/sec |
 | `GET /api/database/tables` | List all tables with row counts |
 | `GET /api/database/tables/{name}` | Browse table data with pagination |
 
@@ -365,7 +411,8 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 | snapshots | Price/volume/orderbook features | ~1,148,000 |
 | trades | Individual trades from WebSocket | ~76,000 |
 | orderbook_snapshots | Full orderbook storage (JSONB) | ~495,000 |
-| task_runs | Task execution history | varies |
+| task_runs | Task execution history (7-day retention) | varies |
+| tier_transitions | Market tier change tracking (7-day retention) | varies |
 | whale_events | Large trade tracking | - |
 
 ---
