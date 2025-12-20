@@ -1,0 +1,203 @@
+# Strategy Configuration
+# Each strategy type has one Python class, many config instances
+# Add new variants by adding entries here - no code changes needed
+
+defaults:
+  size_pct: 0.01
+  order_type: spread
+  allocated_usd: 400
+
+# =============================================================================
+# NO BIAS STRATEGIES
+# Exploit statistical tendency for markets to resolve NO
+# =============================================================================
+no_bias:
+  # 1-hour horizon (highest edge from data)
+  - name: esports_no_1h
+    category: ESPORTS
+    historical_no_rate: 0.715
+    min_hours: 0.1
+    max_hours: 1
+
+  # 24-hour horizon
+  - name: economics_no_24h
+    category: ECONOMICS
+    historical_no_rate: 0.677
+    min_hours: 1
+    max_hours: 24
+
+  - name: crypto_no_24h
+    category: CRYPTO
+    historical_no_rate: 0.573
+    min_hours: 1
+    max_hours: 24
+    min_liquidity: 1000
+
+  # 7-day horizon (testing - data shows NO overpriced here)
+  - name: esports_no_7d
+    category: ESPORTS
+    historical_no_rate: 0.715
+    min_hours: 24
+    max_hours: 168
+
+  - name: economics_no_7d
+    category: ECONOMICS
+    historical_no_rate: 0.677
+    min_hours: 24
+    max_hours: 168
+
+  - name: crypto_no_7d
+    category: CRYPTO
+    historical_no_rate: 0.573
+    min_hours: 24
+    max_hours: 168
+    min_liquidity: 1000
+
+  - name: business_no_7d
+    category: BUSINESS
+    historical_no_rate: 0.630
+    min_hours: 24
+    max_hours: 168
+
+  # 14-day horizon (exploratory)
+  - name: esports_no_14d
+    category: ESPORTS
+    historical_no_rate: 0.715
+    min_hours: 168
+    max_hours: 336
+
+  - name: economics_no_14d
+    category: ECONOMICS
+    historical_no_rate: 0.677
+    min_hours: 168
+    max_hours: 336
+
+  - name: crypto_no_14d
+    category: CRYPTO
+    historical_no_rate: 0.573
+    min_hours: 168
+    max_hours: 336
+    min_liquidity: 1000
+
+  - name: business_no_14d
+    category: BUSINESS
+    historical_no_rate: 0.630
+    min_hours: 168
+    max_hours: 336
+
+# =============================================================================
+# LONGSHOT STRATEGIES
+# Buy high-probability outcomes near expiry
+# =============================================================================
+longshot:
+  - name: longshot_yes_v1
+    side: YES
+    min_probability: 0.92
+    max_probability: 0.99
+    max_hours: 72
+    min_liquidity: 5000
+
+  - name: longshot_no_v1
+    side: NO
+    min_probability: 0.85
+    max_probability: 0.98
+    max_hours: 4
+
+  - name: longshot_no_v1_no_sports
+    side: NO
+    min_probability: 0.85
+    max_probability: 0.98
+    max_hours: 4
+    excluded_categories: [SPORTS]
+
+# =============================================================================
+# MEAN REVERSION STRATEGIES
+# Fade price deviations from mean
+# =============================================================================
+mean_reversion:
+  - name: mean_reversion_2sigma
+    std_threshold: 2.0
+    min_deviation_pct: 0.05
+    lookback_hours: 24
+    min_history_points: 10
+    min_liquidity: 5000
+
+  - name: mean_reversion_3sigma
+    std_threshold: 3.0
+    min_deviation_pct: 0.08
+    lookback_hours: 24
+    min_history_points: 15
+    min_liquidity: 5000
+
+  - name: mean_reversion_1h
+    std_threshold: 2.0
+    min_deviation_pct: 0.03
+    lookback_hours: 1
+    min_history_points: 5
+    min_liquidity: 3000
+
+  - name: mean_reversion_crypto
+    std_threshold: 2.5
+    min_deviation_pct: 0.06
+    lookback_hours: 24
+    min_history_points: 12
+    min_liquidity: 2000
+    category: CRYPTO
+
+# =============================================================================
+# WHALE FADE STRATEGIES
+# Fade large trades expecting reversion
+# =============================================================================
+whale_fade:
+  - name: fade_whale_yes
+    direction: YES  # Fade YES whale buys → buy NO
+    min_whale_volume: 5000
+    min_whale_ratio: 0.7
+    min_liquidity: 3000
+
+  - name: fade_whale_no
+    direction: NO   # Fade NO whale buys → buy YES
+    min_whale_volume: 5000
+    min_whale_ratio: 0.7
+    min_liquidity: 3000
+
+  - name: fade_whale_any
+    direction: ANY  # Fade either direction
+    min_whale_volume: 5000
+    min_imbalance_ratio: 0.6
+    min_liquidity: 3000
+
+# =============================================================================
+# FLOW STRATEGIES
+# Fade volume spikes and order flow imbalances
+# =============================================================================
+flow:
+  - name: volume_spike_fade
+    type: volume_spike
+    spike_multiplier: 3.0
+    min_volume: 1000
+    min_directional_ratio: 0.6
+    min_liquidity: 3000
+
+  - name: book_imbalance_fade
+    type: book_imbalance
+    min_imbalance: 0.7
+    min_liquidity: 5000
+
+  - name: flow_reversal
+    type: flow_ratio
+    min_flow_ratio: 0.8
+    min_trade_count: 10
+    min_liquidity: 3000
+
+# =============================================================================
+# NEW MARKET STRATEGIES
+# Buy NO on new markets (convergence hypothesis)
+# =============================================================================
+new_market:
+  - name: new_market_no
+    min_no_probability: 0.50
+    max_no_probability: 0.90
+    min_hours_to_expiry: 168
+    min_liquidity: 500
+    assumed_no_rate: 0.60

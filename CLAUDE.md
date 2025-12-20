@@ -37,9 +37,12 @@ Strategy:
 | Tier Transition Tracking | COMPLETE | Dec 19, 2024 |
 | Enhanced Monitoring Dashboard | COMPLETE | Dec 19, 2024 |
 | WebSocket Trade Rate Health | COMPLETE | Dec 19, 2024 |
-| Strategy-as-Code System | COMPLETE | Dec 19, 2024 |
 | Telegram Alerts | COMPLETE | Dec 19, 2024 |
 | Trade Decision Audit Trail | COMPLETE | Dec 19, 2024 |
+| Config-Driven Strategies | COMPLETE | Dec 20, 2024 |
+| Per-Strategy Wallets | COMPLETE | Dec 20, 2024 |
+| Performance Tracking (Sharpe) | COMPLETE | Dec 20, 2024 |
+| Strategy Debug CLI | COMPLETE | Dec 20, 2024 |
 | ML Pipeline | NOT STARTED | - |
 
 **Current Phase**: 1 OPERATIONAL - Data collection running at ~100% success rate
@@ -109,16 +112,21 @@ docker-compose ps
 | `src/db/redis.py` | Redis client with activity tracking |
 | `src/api/routes/monitoring.py` | Monitoring API endpoints |
 | `src/api/routes/database.py` | Database browser API |
+| `src/api/routes/executor.py` | Strategy performance + debug endpoints |
 | `frontend/src/pages/Monitoring.tsx` | System monitoring dashboard |
 | `frontend/src/pages/Database.tsx` | Database browser UI |
+| `strategies.yaml` | **Central config** for all 25 strategies |
+| `strategies/types/` | Strategy type classes (6 types) |
+| `strategies/loader.py` | Reads YAML, instantiates strategies |
+| `strategies/performance.py` | Sharpe, Sortino, drawdown calculations |
 | `strategies/base.py` | Strategy base class with SHA tracking |
-| `strategies/longshot_yes_v1.py` | First strategy-as-code example |
-| `cli/deploy.py` | Deploy strategies CLI tool |
+| `cli/debug.py` | Debug CLI - diagnose why strategies aren't trading |
+| `cli/deploy.py` | List/validate strategies CLI |
 | `cli/status.py` | System status CLI tool |
 | `cli/backtest.py` | Strategy backtesting CLI tool |
-| `deployed_strategies.yaml` | Registry of deployed strategies |
 | `src/alerts/telegram.py` | Telegram alert notifications |
-| `src/executor/models.py` | Executor models (incl. TradeDecision) |
+| `src/executor/models.py` | Executor models (incl. TradeDecision, StrategyBalance) |
+| `src/executor/engine/runner.py` | Main executor loop, loads from strategies.yaml |
 | `src/tasks/alerts.py` | Daily summary Celery task |
 | `.claude/commands/trading.md` | Trading CLI slash command |
 | `.claude/commands/categorize.md` | Categorization slash command |
@@ -449,6 +457,59 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 
 ---
 
+### Session 10 - Dec 20, 2024 (Config-Driven Strategy System)
+**Goal**: Replace 25 individual strategy files with a config-driven architecture. Add per-strategy wallets and performance tracking.
+
+**Architecture Refactoring**:
+- **OLD**: 25 separate Python files, one per strategy variant
+- **NEW**: 1 YAML config + 6 strategy type classes
+
+**New Files Created**:
+- `strategies.yaml` - Central config with all 25 strategy instances
+- `strategies/types/` - 6 strategy type classes:
+  - `no_bias.py` - NoBiasStrategy (11 instances)
+  - `longshot.py` - LongshotStrategy (3 instances)
+  - `mean_reversion.py` - MeanReversionStrategy (4 instances)
+  - `whale_fade.py` - WhaleFadeStrategy (3 instances)
+  - `flow.py` - FlowStrategy (3 instances)
+  - `new_market.py` - NewMarketStrategy (1 instance)
+- `strategies/loader.py` - Reads YAML, instantiates strategies
+- `strategies/performance.py` - Sharpe, Sortino, drawdown calculations
+- `cli/debug.py` - CLI to diagnose "why isn't it trading?"
+
+**Per-Strategy Wallets** (`src/executor/models.py`):
+- `StrategyBalance` model with $400 allocation per strategy
+- Tracks: current_usd, realized_pnl, unrealized_pnl, trade_count, win/loss
+- High/low water marks, max drawdown tracking
+
+**Performance Metrics**:
+- Sharpe ratio (annualized)
+- Sortino ratio (downside deviation)
+- Max drawdown (USD and %)
+- Win rate, profit factor, expectancy
+
+**New API Endpoints** (`src/api/routes/executor.py`):
+- `GET /executor/strategies` - List all loaded strategies
+- `GET /executor/strategies/leaderboard` - Ranked by P&L, Sharpe, etc.
+- `GET /executor/strategies/balances` - Per-strategy wallet info
+- `GET /executor/strategies/{name}/metrics` - Detailed performance
+- `GET /executor/strategies/{name}/debug` - Funnel diagnostics
+
+**Executor Updates**:
+- Runner now loads from `strategies.yaml` (not `deployed_strategies.yaml`)
+- Auto-reloads when YAML changes
+- Each strategy type has `get_debug_stats()` for funnel analysis
+
+**Files Deleted**: 25 individual strategy Python files (2,763 → 1,900 lines)
+
+**Results**:
+- Add new strategy variants by editing YAML (no code changes)
+- Debug CLI: `python3 -m cli.debug esports_no_1h`
+- Leaderboard: `python3 -m cli.debug` (no args)
+- Full performance tracking with Sharpe/drawdown
+
+---
+
 ## Monitoring Endpoints
 
 | Endpoint | Purpose |
@@ -466,44 +527,49 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 | `GET /api/database/tables` | List all tables with row counts |
 | `GET /api/database/tables/{name}` | Browse table data with pagination |
 | `GET /api/executor/decisions` | Recent trade decisions with audit info |
+| `GET /api/executor/strategies` | List all loaded strategies |
+| `GET /api/executor/strategies/leaderboard` | Performance ranking (sort by P&L, Sharpe) |
+| `GET /api/executor/strategies/balances` | Per-strategy wallet balances |
+| `GET /api/executor/strategies/{name}/metrics` | Detailed metrics for one strategy |
+| `GET /api/executor/strategies/{name}/debug` | Debug info (params, funnel, decisions) |
 
 ---
 
-## Strategy-as-Code Workflow
+## Config-Driven Strategy System
 
-### Writing a Strategy
+### Architecture
 
-Create a Python file in `strategies/` that inherits from `Strategy`:
+Strategies use a **config-driven** approach:
+- `strategies.yaml` - Central config with all strategy instances
+- `strategies/types/` - Python classes for each strategy type (6 types)
+- Add new variants by editing YAML - no code changes needed
 
-```python
-# strategies/my_strategy.py
-from strategies.base import Strategy, Signal
+### Strategy Types
 
-class MyStrategy(Strategy):
-    name = "my_strategy"
-    version = "1.0.0"
+| Type | Class | Count | Purpose |
+|------|-------|-------|---------|
+| `no_bias` | `NoBiasStrategy` | 11 | Exploit NO resolution bias by category |
+| `longshot` | `LongshotStrategy` | 3 | Buy high-probability outcomes near expiry |
+| `mean_reversion` | `MeanReversionStrategy` | 4 | Fade price deviations from mean |
+| `whale_fade` | `WhaleFadeStrategy` | 3 | Fade large trades expecting reversion |
+| `flow` | `FlowStrategy` | 3 | Fade volume spikes and order flow |
+| `new_market` | `NewMarketStrategy` | 1 | Buy NO on new markets |
 
-    # Parameters (class attributes = configurable)
-    min_edge = 0.05
-    max_position_usd = 100
+### Adding a New Strategy Variant
 
-    def scan(self, markets: list[dict]) -> list[Signal]:
-        signals = []
-        for market in markets:
-            if self._should_trade(market):
-                signals.append(Signal(
-                    strategy_name=self.name,
-                    strategy_sha=self.get_sha(),
-                    market_id=market["id"],
-                    side="YES",
-                    reason="My trade reason",
-                    edge=0.10,
-                    size_usd=25,
-                ))
-        return signals
+Edit `strategies.yaml` and add an entry under the appropriate type:
 
-strategy = MyStrategy()  # Required: module-level instance
+```yaml
+no_bias:
+  - name: politics_no_24h
+    category: POLITICS
+    historical_no_rate: 0.55
+    min_hours: 1
+    max_hours: 24
+    min_liquidity: 1000
 ```
+
+The executor auto-reloads when `strategies.yaml` changes.
 
 ### CLI Commands
 
@@ -511,14 +577,20 @@ strategy = MyStrategy()  # Required: module-level instance
 # Check system status
 python -m cli.status
 
-# Backtest a strategy
-python -m cli.backtest strategies/my_strategy.py --days 30
+# List all strategies
+python -m cli.deploy --list
 
-# Deploy a strategy (validates + adds to deployed_strategies.yaml)
-python -m cli.deploy strategies/my_strategy.py
+# Validate config
+python -m cli.deploy --validate
 
-# View deployed strategies
-cat deployed_strategies.yaml
+# Debug a strategy (why isn't it trading?)
+python -m cli.debug esports_no_1h
+
+# Show leaderboard
+python -m cli.debug
+
+# Run funnel analysis on all strategies
+python -m cli.debug --funnel
 ```
 
 ### Telegram Alerts Setup
@@ -631,7 +703,8 @@ CRYPTO, SPORTS, ESPORTS, POLITICS, ECONOMICS, BUSINESS, ENTERTAINMENT, WEATHER, 
 | signals | Trading signals from strategies | varies |
 | positions | Open/closed trading positions | varies |
 | executor_trades | Executed trades | varies |
-| paper_balance | Paper trading balance | 1 |
+| paper_balances | Overall paper trading balance | 1 |
+| strategy_balances | Per-strategy wallet allocation and P&L | 25 |
 
 ---
 
@@ -641,11 +714,14 @@ CRYPTO, SPORTS, ESPORTS, POLITICS, ECONOMICS, BUSINESS, ENTERTAINMENT, WEATHER, 
 - WebSocket capturing **~380 trades/minute** across 4 connections
 - System hardened for autonomous operation (log rotation, health checks, staggered reconnects)
 - Use `/api/monitoring/critical` for external uptime monitoring (returns 503 on failure)
-- **Strategy-as-Code deployed**: `longshot_yes_v1` enabled in `deployed_strategies.yaml`
+- **Config-driven strategies**: 25 strategies in `strategies.yaml`
+- **Per-strategy wallets**: Each strategy has $400 allocation in `strategy_balances` table
+- **Performance tracking**: Sharpe, Sortino, drawdown in `strategies/performance.py`
+- **Debug CLI**: `python -m cli.debug <strategy_name>` to diagnose issues
 - **Telegram alerts**: Configure `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to enable
 - **Next priorities**:
-  1. Monitor `longshot_yes_v1` strategy performance via trade_decisions table
-  2. Write additional strategies as Python files in `strategies/`
+  1. Monitor strategy performance via leaderboard (`python -m cli.debug`)
+  2. Add new strategy variants by editing `strategies.yaml` (no code changes)
   3. Begin ML pipeline design once sufficient resolved markets exist
   4. Consider adding more sophisticated backtesting with slippage simulation
 

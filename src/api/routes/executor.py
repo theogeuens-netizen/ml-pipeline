@@ -22,6 +22,7 @@ from src.executor.models import (
     ExecutorTrade,
     Position,
     PaperBalance,
+    StrategyBalance,
     TradeDecision,
     PositionStatus,
     SignalStatus,
@@ -620,4 +621,172 @@ def _format_decision(d: TradeDecision) -> dict:
         "rejected_reason": d.rejected_reason,
         "execution_price": float(d.execution_price) if d.execution_price else None,
         "position_id": d.position_id,
+    }
+
+
+# =============================================================================
+# STRATEGY PERFORMANCE ENDPOINTS
+# =============================================================================
+
+
+@router.get("/strategies/leaderboard")
+async def get_strategy_leaderboard(
+    sort_by: str = Query("total_pnl", description="Sort metric"),
+    limit: int = Query(25, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """
+    Get leaderboard of all strategies sorted by performance.
+
+    Sort options: total_pnl, sharpe_ratio, win_rate, total_return_pct
+    """
+    from strategies.performance import PerformanceTracker
+
+    tracker = PerformanceTracker(db)
+    metrics_list = tracker.get_leaderboard(sort_by=sort_by, limit=limit)
+
+    return {
+        "sort_by": sort_by,
+        "total": len(metrics_list),
+        "strategies": [_format_strategy_metrics(m) for m in metrics_list],
+    }
+
+
+@router.get("/strategies/{strategy_name}/metrics")
+async def get_strategy_metrics(
+    strategy_name: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Get detailed performance metrics for a specific strategy.
+    """
+    from strategies.performance import PerformanceTracker
+
+    tracker = PerformanceTracker(db)
+    metrics = tracker.get_strategy_metrics(strategy_name)
+
+    if not metrics:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_name} not found")
+
+    return _format_strategy_metrics(metrics)
+
+
+@router.get("/strategies/{strategy_name}/debug")
+async def get_strategy_debug(
+    strategy_name: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Get debug information for a strategy.
+
+    Answers "why isn't this trading?" with:
+    - Strategy parameters
+    - Recent decision history (executed, rejected)
+    - Funnel stats from strategy's get_debug_stats()
+    """
+    from strategies.performance import PerformanceTracker
+
+    tracker = PerformanceTracker(db)
+    debug_info = tracker.get_debug_info(strategy_name)
+
+    return debug_info
+
+
+@router.get("/strategies/balances")
+async def get_strategy_balances(
+    db: Session = Depends(get_db),
+):
+    """
+    Get per-strategy wallet balances.
+
+    Returns current balance, allocation, and P&L for each strategy.
+    """
+    balances = db.query(StrategyBalance).order_by(
+        desc(StrategyBalance.total_pnl)
+    ).all()
+
+    return {
+        "total": len(balances),
+        "total_allocated": sum(float(b.allocated_usd) for b in balances),
+        "total_current": sum(float(b.current_usd) for b in balances),
+        "total_pnl": sum(float(b.total_pnl) for b in balances),
+        "strategies": [
+            {
+                "name": b.strategy_name,
+                "allocated_usd": float(b.allocated_usd),
+                "current_usd": float(b.current_usd),
+                "total_pnl": float(b.total_pnl),
+                "realized_pnl": float(b.realized_pnl),
+                "unrealized_pnl": float(b.unrealized_pnl),
+                "trade_count": b.trade_count,
+                "win_count": b.win_count,
+                "loss_count": b.loss_count,
+                "win_rate": b.win_count / b.trade_count if b.trade_count > 0 else 0,
+                "max_drawdown_pct": float(b.max_drawdown_pct),
+            }
+            for b in balances
+        ],
+    }
+
+
+@router.get("/strategies")
+async def list_strategies(db: Session = Depends(get_db)):
+    """
+    List all loaded strategies with their configuration.
+    """
+    from strategies.loader import load_strategies
+
+    strategies = load_strategies()
+
+    return {
+        "total": len(strategies),
+        "strategies": [
+            {
+                "name": s.name,
+                "type": type(s).__name__,
+                "version": s.version,
+                "sha": s.get_sha(),
+                "params": {
+                    k: getattr(s, k)
+                    for k in dir(s)
+                    if not k.startswith("_")
+                    and k not in ("name", "version", "logger", "scan", "filter",
+                                  "get_sha", "get_params", "should_exit",
+                                  "on_signal_executed", "on_position_closed",
+                                  "get_debug_stats")
+                    and not callable(getattr(s, k, None))
+                },
+            }
+            for s in strategies
+        ],
+    }
+
+
+def _format_strategy_metrics(m) -> dict:
+    """Format StrategyMetrics for API response."""
+    return {
+        "strategy_name": m.strategy_name,
+        "allocated_usd": m.allocated_usd,
+        "current_usd": m.current_usd,
+        "total_pnl": m.total_pnl,
+        "realized_pnl": m.realized_pnl,
+        "unrealized_pnl": m.unrealized_pnl,
+        "total_return_pct": m.total_return_pct,
+        "trade_count": m.trade_count,
+        "win_count": m.win_count,
+        "loss_count": m.loss_count,
+        "win_rate": m.win_rate,
+        "sharpe_ratio": m.sharpe_ratio,
+        "sortino_ratio": m.sortino_ratio,
+        "max_drawdown_usd": m.max_drawdown_usd,
+        "max_drawdown_pct": m.max_drawdown_pct,
+        "current_drawdown_pct": m.current_drawdown_pct,
+        "avg_win_usd": m.avg_win_usd,
+        "avg_loss_usd": m.avg_loss_usd,
+        "profit_factor": m.profit_factor,
+        "expectancy_usd": m.expectancy_usd,
+        "avg_hold_hours": m.avg_hold_hours,
+        "open_positions": m.open_positions,
+        "first_trade": m.first_trade.isoformat() if m.first_trade else None,
+        "last_trade": m.last_trade.isoformat() if m.last_trade else None,
     }

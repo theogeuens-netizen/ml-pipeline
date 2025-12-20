@@ -51,6 +51,9 @@ class MarketData:
 
     # Categories and metadata
     category: Optional[str] = None
+    category_l1: Optional[str] = None  # e.g., CRYPTO, SPORTS, POLITICS
+    category_l2: Optional[str] = None  # e.g., Bitcoin, NFL, US Elections
+    category_l3: Optional[str] = None  # e.g., Price, Super Bowl, Presidential
     event_id: Optional[str] = None
     event_title: Optional[str] = None
 

@@ -1,7 +1,0 @@
-strategies:
-- path: strategies/longshot_yes_v1.py
-  enabled: true
-  sha: unknown
-  deployed_at: '2025-12-19T13:33:34.362548+00:00'
-  name: longshot_yes_v1
-  version: 1.0.0

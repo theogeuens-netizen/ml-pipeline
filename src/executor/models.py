@@ -327,6 +327,49 @@ class PaperBalance(Base):
     )
 
 
+class StrategyBalance(Base):
+    """
+    Per-strategy balance tracking for isolated testing.
+
+    Each strategy gets its own wallet allocation with independent P&L tracking.
+    Allows parallel testing of multiple strategies without interference.
+    """
+    __tablename__ = "strategy_balances"
+
+    strategy_name: Mapped[str] = mapped_column(String(100), primary_key=True)
+
+    # Allocation
+    allocated_usd: Mapped[float] = mapped_column(Numeric(20, 2), default=400.0)
+    current_usd: Mapped[float] = mapped_column(Numeric(20, 2), default=400.0)
+
+    # P&L tracking
+    realized_pnl: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+    unrealized_pnl: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+    total_pnl: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+
+    # Performance stats
+    position_count: Mapped[int] = mapped_column(Integer, default=0)
+    trade_count: Mapped[int] = mapped_column(Integer, default=0)
+    win_count: Mapped[int] = mapped_column(Integer, default=0)
+    loss_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # High/low water marks
+    high_water_mark: Mapped[float] = mapped_column(Numeric(20, 2), default=400.0)
+    low_water_mark: Mapped[float] = mapped_column(Numeric(20, 2), default=400.0)
+
+    # Max drawdown tracking
+    max_drawdown_usd: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+    max_drawdown_pct: Mapped[float] = mapped_column(Numeric(10, 6), default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class TradeDecision(Base):
     """
     Audit trail for decision replay.

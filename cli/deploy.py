@@ -1,168 +1,96 @@
 """
-Deploy a strategy for live/paper execution.
+Strategy management CLI.
 
 Usage:
-    python -m cli.deploy strategies/longshot_yes_v1.py
-    python -m cli.deploy strategies/longshot_yes_v1.py --disable
-    python -m cli.deploy --list
+    python -m cli.deploy --list           # List all strategies
+    python -m cli.deploy --validate       # Validate strategies.yaml
 
-Validates the strategy and adds it to deployed_strategies.yaml
-with SHA for version tracking.
+Note: With the config-driven approach, strategies are managed by editing
+strategies.yaml directly. This CLI validates the configuration.
 """
 
 import argparse
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
-
-import yaml
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from strategies import load_strategy
-
-CONFIG_PATH = Path(__file__).parent.parent / "deployed_strategies.yaml"
-
-
-def load_config() -> dict:
-    """Load deployed strategies config."""
-    if not CONFIG_PATH.exists():
-        return {"strategies": []}
-
-    with open(CONFIG_PATH) as f:
-        return yaml.safe_load(f) or {"strategies": []}
-
-
-def save_config(config: dict):
-    """Save deployed strategies config."""
-    with open(CONFIG_PATH, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Deploy a strategy for execution"
-    )
-    parser.add_argument(
-        "strategy",
-        nargs="?",
-        help="Path to strategy file (e.g., strategies/longshot_yes_v1.py)"
-    )
-    parser.add_argument(
-        "--disable",
-        action="store_true",
-        help="Disable the strategy instead of enabling"
-    )
-    parser.add_argument(
-        "--remove",
-        action="store_true",
-        help="Remove the strategy from deployment"
+        description="Strategy management (config-driven)"
     )
     parser.add_argument(
         "--list",
         action="store_true",
-        help="List all deployed strategies"
+        help="List all strategies from strategies.yaml"
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validate strategies.yaml configuration"
     )
     args = parser.parse_args()
 
-    config = load_config()
-    strategies = config.get("strategies", [])
+    if not args.list and not args.validate:
+        args.list = True  # Default to list
 
-    # List mode
+    from strategies.loader import load_strategies, validate_config
+
+    if args.validate:
+        print("\nValidating strategies.yaml...")
+        errors = validate_config()
+        if errors:
+            print("\nErrors found:")
+            for e in errors:
+                print(f"  - {e}")
+            sys.exit(1)
+        else:
+            print("Configuration valid!")
+        print()
+
     if args.list:
         print(f"\n{'='*60}")
-        print("DEPLOYED STRATEGIES")
+        print("STRATEGIES (from strategies.yaml)")
         print(f"{'='*60}\n")
 
+        strategies = load_strategies()
+
         if not strategies:
-            print("No strategies deployed.")
-            print("Use: python -m cli.deploy <strategy_file>")
-        else:
-            for s in strategies:
-                status = "ENABLED" if s.get("enabled") else "DISABLED"
-                print(f"[{status}] {s.get('path')}")
-                print(f"    SHA: {s.get('sha')}")
-                print(f"    Deployed: {s.get('deployed_at')}")
-                print()
+            print("No strategies found in strategies.yaml")
+            sys.exit(0)
 
-        sys.exit(0)
+        # Group by type
+        by_type = {}
+        for s in strategies:
+            type_name = type(s).__name__
+            if type_name not in by_type:
+                by_type[type_name] = []
+            by_type[type_name].append(s)
 
-    # Need strategy path for other operations
-    if not args.strategy:
-        parser.print_help()
-        sys.exit(1)
+        for type_name, strats in by_type.items():
+            print(f"{type_name} ({len(strats)})")
+            print("-" * 40)
+            for s in strats:
+                print(f"  {s.name}")
+                # Show key parameters
+                params = []
+                for k in dir(s):
+                    if k.startswith("_") or k in ("name", "version", "logger"):
+                        continue
+                    v = getattr(s, k, None)
+                    if callable(v):
+                        continue
+                    if isinstance(v, (int, float, str, bool)):
+                        if k in ("category", "side", "direction", "type"):
+                            params.append(f"{k}={v}")
+                if params:
+                    print(f"    ({', '.join(params[:3])})")
+            print()
 
-    strategy_path = args.strategy
-
-    # Normalize path
-    if not strategy_path.startswith("strategies/"):
-        if strategy_path.startswith("./"):
-            strategy_path = strategy_path[2:]
-
-    # Find existing entry
-    existing_idx = None
-    for i, s in enumerate(strategies):
-        if s.get("path") == strategy_path:
-            existing_idx = i
-            break
-
-    # Remove mode
-    if args.remove:
-        if existing_idx is not None:
-            removed = strategies.pop(existing_idx)
-            config["strategies"] = strategies
-            save_config(config)
-            print(f"Removed: {removed.get('path')}")
-        else:
-            print(f"Strategy not found in deployment: {strategy_path}")
-            sys.exit(1)
-        sys.exit(0)
-
-    # Load and validate strategy
-    strategy = load_strategy(strategy_path)
-    if not strategy:
-        print(f"Error: Failed to load strategy from {strategy_path}")
-        sys.exit(1)
-
-    # Get strategy info
-    sha = strategy.get_sha()
-    now = datetime.now(timezone.utc).isoformat()
-
-    print(f"\n{'='*60}")
-    print(f"Deploying: {strategy.name} v{strategy.version}")
-    print(f"SHA: {sha}")
-    print(f"Parameters:")
-    for key, value in strategy.get_params().items():
-        print(f"  {key}: {value}")
-    print(f"{'='*60}\n")
-
-    # Create or update entry
-    entry = {
-        "path": strategy_path,
-        "enabled": not args.disable,
-        "sha": sha,
-        "deployed_at": now,
-        "name": strategy.name,
-        "version": strategy.version,
-    }
-
-    if existing_idx is not None:
-        old_sha = strategies[existing_idx].get("sha")
-        if old_sha != sha:
-            print(f"Strategy updated: SHA {old_sha} -> {sha}")
-        strategies[existing_idx] = entry
-        action = "Updated"
-    else:
-        strategies.append(entry)
-        action = "Added"
-
-    config["strategies"] = strategies
-    save_config(config)
-
-    status = "enabled" if not args.disable else "disabled"
-    print(f"{action}: {strategy_path} ({status})")
-    print(f"Config saved to: {CONFIG_PATH}")
+        print(f"Total: {len(strategies)} strategies")
+        print()
 
 
 if __name__ == "__main__":

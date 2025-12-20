@@ -15,16 +15,37 @@ When user invokes the CLI (says "trading CLI", "be my trading bot", etc.), displ
 
 Commands:
   status          Show balance, positions, recent activity
-  strategies      List deployed strategies and parameters
-  create          Create a new strategy from description
+  strategies      List strategies and parameters
+  leaderboard     Strategy performance ranking
+  debug <name>    Diagnose why a strategy isn't trading
+  create          Create a new strategy type
   adjust          Change strategy parameters or risk settings
-  deploy          Deploy/undeploy a strategy
   backtest        Test a strategy against historical data
   logs            Show recent errors or activity
   advise          Switch to proactive advisor mode
 
 Ready for action. What would you like to do?
 ```
+
+---
+
+## Architecture Overview
+
+Strategies are **config-driven**:
+- **`strategies.yaml`**: Central config file with all strategy instances
+- **`strategies/types/`**: Python classes for each strategy type (6 types)
+- **`strategies/loader.py`**: Reads YAML, instantiates strategies
+- **`strategies/performance.py`**: Sharpe, Sortino, drawdown calculations
+
+**Strategy Types:**
+| Type | Class | Purpose |
+|------|-------|---------|
+| `no_bias` | `NoBiasStrategy` | Exploit NO resolution bias by category |
+| `longshot` | `LongshotStrategy` | Buy high-probability outcomes near expiry |
+| `mean_reversion` | `MeanReversionStrategy` | Fade price deviations from mean |
+| `whale_fade` | `WhaleFadeStrategy` | Fade large trades expecting reversion |
+| `flow` | `FlowStrategy` | Fade volume spikes and order flow |
+| `new_market` | `NewMarketStrategy` | Buy NO on new markets |
 
 ---
 
@@ -55,6 +76,12 @@ SELECT balance_usd::float, starting_balance_usd::float,
        (balance_usd - starting_balance_usd)::float as pnl
 FROM paper_balances LIMIT 1;"
 
+# Per-strategy balances
+docker-compose exec -T postgres psql -U postgres -d polymarket_ml -c "
+SELECT strategy_name, current_usd::float, total_pnl::float,
+       trade_count, win_count, loss_count
+FROM strategy_balances ORDER BY total_pnl DESC LIMIT 10;"
+
 # Open positions
 docker-compose exec -T postgres psql -U postgres -d polymarket_ml -c "
 SELECT strategy_name, side, cost_basis::float, entry_price::float,
@@ -67,11 +94,6 @@ SELECT timestamp::text, strategy_name, signal_side,
        (signal_edge::float * 100)::numeric(5,2) as edge_pct,
        executed, COALESCE(LEFT(rejected_reason, 30), '') as rejected
 FROM trade_decisions ORDER BY timestamp DESC LIMIT 10;"
-
-# Position count and exposure
-docker-compose exec -T postgres psql -U postgres -d polymarket_ml -c "
-SELECT COUNT(*) as positions, COALESCE(SUM(cost_basis::float), 0) as exposure
-FROM positions WHERE status = 'open';"
 ```
 
 **Display format:**
@@ -84,21 +106,19 @@ BALANCE
   P&L: +$XXX.XX (+X.X%)
 
 RISK UTILIZATION
-  Positions: X / 20 (XX%)
+  Positions: X / 60 (XX%)
   Exposure: $XXX / $1,000 (XX%)
   Drawdown: X.X% / 15%
+
+TOP STRATEGIES BY P&L
+| Strategy | Balance | P&L | Trades | Win% |
+|----------|---------|-----|--------|------|
+| ...      | ...     | ... | ...    | ...  |
 
 OPEN POSITIONS (X)
 | Strategy | Side | Cost | Entry | Current | P&L |
 |----------|------|------|-------|---------|-----|
 | ...      | ...  | ...  | ...   | ...     | ... |
-
-RECENT DECISIONS (last 24h)
-| Time | Strategy | Side | Edge | Status |
-|------|----------|------|------|--------|
-| ...  | ...      | ...  | ...  | ...    |
-
-[Any insights from proactive checks - see below]
 ```
 
 ---
@@ -107,134 +127,215 @@ RECENT DECISIONS (last 24h)
 
 **Run:**
 ```bash
-cat /home/theo/polymarket-ml/deployed_strategies.yaml
+python3 -m cli.deploy --list
 ```
 
-**For each strategy, also show parameters:**
+Or query the loader directly:
 ```bash
-cat /home/theo/polymarket-ml/strategies/<filename>.py
+python3 -c "
+from strategies.loader import load_strategies
+for s in load_strategies():
+    print(f'{s.name} ({type(s).__name__})')
+"
 ```
 
 **Display format:**
 ```
-DEPLOYED STRATEGIES
+STRATEGIES (from strategies.yaml)
 
-[ON] longshot_yes_v1
-     File: strategies/longshot_yes_v1.py
-     Parameters:
-       min_probability: 0.92
-       max_probability: 0.99
-       max_hours_to_expiry: 72
-       min_liquidity_usd: 5000
-       size_usd: 25
+NoBiasStrategy (11)
+  esports_no_1h (category=ESPORTS, min_hours=0.1, max_hours=1)
+  economics_no_24h (category=ECONOMICS, min_hours=1, max_hours=24)
+  ...
+
+LongshotStrategy (3)
+  longshot_yes_v1 (side=YES, min_prob=0.92, max_hours=72)
+  ...
+
+Total: 25 strategies
+```
+
+---
+
+### `leaderboard` - Performance Ranking
+
+**Run:**
+```bash
+docker-compose exec -T postgres psql -U postgres -d polymarket_ml -c "
+SELECT strategy_name,
+       current_usd::float as balance,
+       total_pnl::float as pnl,
+       CASE WHEN allocated_usd > 0 THEN (total_pnl / allocated_usd * 100)::numeric(5,1) ELSE 0 END as return_pct,
+       trade_count,
+       CASE WHEN trade_count > 0 THEN (win_count::float / trade_count * 100)::numeric(5,1) ELSE 0 END as win_rate,
+       max_drawdown_pct::float as max_dd
+FROM strategy_balances
+ORDER BY total_pnl DESC;"
+```
+
+**Display format:**
+```
+STRATEGY LEADERBOARD
+====================================================================
+Strategy                   P&L    Return  Win%  Sharpe  MaxDD  Trades
+--------------------------------------------------------------------
+esports_no_1h           +$52.30   +13.1%   65%   +1.24   5.2%      23
+mean_reversion_2sigma   +$31.20    +7.8%   58%   +0.89   3.1%      15
+...
+====================================================================
+```
+
+---
+
+### `debug <strategy_name>` - Diagnose Strategy
+
+**Run:**
+```bash
+python3 -m cli.debug <strategy_name>
+```
+
+**Or via API:**
+```bash
+curl -s http://localhost:8000/api/executor/strategies/<name>/debug | python3 -m json.tool
+```
+
+**Display format:**
+```
+============================================================
+ STRATEGY: esports_no_1h
+ Type: NoBiasStrategy
+ Version: 2.0.0
+============================================================
+
+PARAMETERS:
+  category: ESPORTS
+  historical_no_rate: 0.715
+  min_hours: 0.1
+  max_hours: 1
+  min_liquidity: 0
+
+LAST 24 HOURS:
+  Total decisions: 5
+  Executed: 2
+  Rejected: 3
+
+RECENT DECISIONS:
+  2024-12-20T10:30:00 | market=123 | BUY | REJECTED: max_positions
+  2024-12-20T09:15:00 | market=456 | BUY | EXECUTED
+  ...
+
+FUNNEL (why opportunities are filtered):
+  1000 total → 45 (ESPORTS) → 12 (time window) → 3 (with edge)
 ```
 
 ---
 
 ### `create` - Create New Strategy
 
-When user describes a strategy in natural language:
+With the config-driven system, creating a new strategy variant is simple:
 
-1. **Understand the intent** - Ask clarifying questions if needed
-2. **Write the strategy file** to `strategies/<name>.py`
-3. **Validate it** - Check syntax and required methods
-4. **Offer to backtest** before deploying
+**To add a variant of an existing type:**
+1. Edit `strategies.yaml`
+2. Add entry under the appropriate type section
 
-**Template:**
+Example - add a new NO bias strategy:
+```yaml
+no_bias:
+  - name: politics_no_24h
+    category: POLITICS
+    historical_no_rate: 0.55
+    min_hours: 1
+    max_hours: 24
+    min_liquidity: 1000
+```
+
+**To create a new strategy type:**
+1. Create `strategies/types/<name>.py`
+2. Inherit from `Strategy` base class
+3. Implement `scan()` and optionally `get_debug_stats()`
+4. Register in `strategies/types/__init__.py`
+5. Add instances to `strategies.yaml`
+
+**Strategy Type Template:**
 ```python
-"""
-<Strategy description>
-"""
+"""<Strategy Type> - <description>."""
+
 from typing import Iterator
 from strategies.base import Strategy, Signal, Side, MarketData
 
-class <ClassName>(Strategy):
-    name = "<snake_case_name>"
-    version = "1.0.0"
 
-    # Parameters
-    <param1> = <value>
-    <param2> = <value>
+class MyStrategy(Strategy):
+    """<description>."""
 
-    def filter(self, market: MarketData) -> bool:
-        # Quick filter
-        return True
+    def __init__(
+        self,
+        name: str,
+        param1: float = 0.5,
+        param2: int = 10,
+        size_pct: float = 0.01,
+        order_type: str = "spread",
+        **kwargs,
+    ):
+        self.name = name
+        self.version = "1.0.0"
+        self.param1 = param1
+        self.param2 = param2
+        self.size_pct = size_pct
+        self.order_type = order_type
+        super().__init__()
 
     def scan(self, markets: list[MarketData]) -> Iterator[Signal]:
         for m in markets:
-            if not self.filter(m):
-                continue
-            # Logic here
-            yield Signal(
-                token_id=m.yes_token_id,  # or m.no_token_id
-                side=Side.BUY,
-                reason="<reason>",
-                market_id=m.id,
-                price_at_signal=m.price,
-                edge=<edge>,
-                confidence=<confidence>,
-                size_usd=self.<size_param>,
-                strategy_name=self.name,
-                strategy_sha=self.get_sha(),
-            )
+            # Your logic here
+            if self._should_trade(m):
+                yield Signal(
+                    token_id=m.yes_token_id,
+                    side=Side.BUY,
+                    reason="<reason>",
+                    market_id=m.id,
+                    price_at_signal=m.price,
+                    edge=0.05,
+                    confidence=0.6,
+                    strategy_name=self.name,
+                    strategy_sha=self.get_sha(),
+                )
 
-strategy = <ClassName>()
+    def get_debug_stats(self, markets: list[MarketData]) -> dict:
+        # Return funnel stats for debugging
+        return {
+            "total_markets": len(markets),
+            "funnel": "1000 → 50 → 5",
+        }
 ```
 
 ---
 
 ### `adjust` - Change Settings
 
-**Strategy parameters** - Edit the strategy file:
+**Strategy parameters** - Edit `strategies.yaml`:
 ```bash
-# Show current
-cat /home/theo/polymarket-ml/strategies/<name>.py
+# View current config
+cat /home/theo/polymarket-ml/strategies.yaml
 
-# Edit using Edit tool to change class attributes
+# Edit using Edit tool
 ```
 
-**Risk settings** - Edit config.yaml:
+**Risk settings** - Edit `config.yaml`:
 ```bash
 cat /home/theo/polymarket-ml/config.yaml
 ```
 
 | Setting | Location | How to Change |
 |---------|----------|---------------|
-| Bet size | `strategies/<name>.py` → `size_usd` | Edit strategy file |
+| Strategy params | `strategies.yaml` | Edit YAML directly |
+| Bet size (global) | `strategies.yaml` → `defaults.size_pct` | Edit YAML |
+| Bet size (per-strategy) | `strategies.yaml` → strategy entry | Add `size_pct` |
 | Max position | `config.yaml` → `risk.max_position_usd` | Edit config |
 | Max exposure | `config.yaml` → `risk.max_total_exposure_usd` | Edit config |
 | Max positions | `config.yaml` → `risk.max_positions` | Edit config |
 | Max drawdown | `config.yaml` → `risk.max_drawdown_pct` | Edit config |
-| Sizing method | `config.yaml` → `sizing.method` | Edit config |
-| Order type | `config.yaml` → `execution.default_order_type` | Edit config |
 
-After editing config.yaml, restart API:
-```bash
-docker-compose restart api
-```
-
----
-
-### `deploy` / `undeploy` - Manage Deployments
-
-**Deploy:**
-```bash
-# Validate first
-python3 -c "
-import sys
-sys.path.insert(0, '/home/theo/polymarket-ml')
-from strategies import load_strategy
-s = load_strategy('/home/theo/polymarket-ml/strategies/<name>.py')
-print(f'Valid: {s.name} v{s.version}')
-"
-
-# Add to deployed_strategies.yaml
-```
-
-**Undeploy:**
-Edit `/home/theo/polymarket-ml/deployed_strategies.yaml`:
-- Set `enabled: false` to disable
-- Or remove the entry entirely
+After editing, the executor auto-reloads on next scan cycle.
 
 ---
 
@@ -261,10 +362,38 @@ FROM trade_decisions WHERE NOT executed
 ORDER BY timestamp DESC LIMIT 20;"
 ```
 
-**Executor activity:**
+**Strategy debug output:**
 ```bash
-docker-compose logs --tail=100 api 2>&1 | grep -i "signal\|execute\|position"
+python3 -m cli.debug --funnel
 ```
+
+---
+
+## MarketData Fields Available
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Database market ID |
+| `condition_id` | str | Polymarket condition ID |
+| `question` | str | Market question text |
+| `yes_token_id` | str | Token ID for YES side |
+| `no_token_id` | str | Token ID for NO side |
+| `price` | float | Current YES price (0-1) |
+| `best_bid` | float | Best bid price |
+| `best_ask` | float | Best ask price |
+| `spread` | float | Bid-ask spread |
+| `hours_to_close` | float | Hours until market closes |
+| `end_date` | datetime | Market end date |
+| `volume_24h` | float | 24h trading volume |
+| `liquidity` | float | Market liquidity in USD |
+| `category_l1` | str | Top category: CRYPTO, SPORTS, POLITICS, etc. |
+| `category_l2` | str | Sub-category: Bitcoin, NFL, US Elections |
+| `category_l3` | str | Specific: Price, Super Bowl, Presidential |
+| `price_history` | list[float] | Historical prices for mean reversion |
+| `snapshot` | dict | Full snapshot data for audit trail |
+
+**Category L1 Values:**
+`CRYPTO`, `SPORTS`, `ESPORTS`, `POLITICS`, `ECONOMICS`, `BUSINESS`, `ENTERTAINMENT`, `WEATHER`, `SCIENCE`, `TECH`, `LEGAL`, `OTHER`
 
 ---
 
@@ -283,8 +412,6 @@ WHERE NOT executed AND timestamp > NOW() - INTERVAL '1 hour';"
 docker-compose logs --tail=100 api 2>&1 | grep -i "error" | tail -5
 ```
 
-**Surface if:** Any rejected signals or errors found
-
 ### Warnings (Yellow Flags)
 ```bash
 # Check drawdown
@@ -293,99 +420,30 @@ SELECT
   (high_water_mark - balance_usd) / high_water_mark * 100 as drawdown_pct
 FROM paper_balances LIMIT 1;"
 
-# Check exposure utilization
+# Strategies with no activity
 docker-compose exec -T postgres psql -U postgres -d polymarket_ml -c "
-SELECT COALESCE(SUM(cost_basis::float), 0) as exposure FROM positions WHERE status = 'open';"
+SELECT strategy_name FROM strategy_balances
+WHERE trade_count = 0 AND current_usd = allocated_usd;"
 ```
 
 **Surface if:**
 - Drawdown > 10% (max is 15%)
-- Exposure > $800 (max is $1,000)
-- Position count > 16 (max is 20)
-
-### Opportunities (Blue Insights)
-```bash
-# Last signal time per strategy
-docker-compose exec -T postgres psql -U postgres -d polymarket_ml -c "
-SELECT strategy_name, MAX(timestamp)::text as last_signal
-FROM trade_decisions GROUP BY strategy_name;"
-
-# Markets matching criteria but not traded
-docker-compose exec -T postgres psql -U postgres -d polymarket_ml -c "
-SELECT COUNT(*) FROM markets m
-JOIN LATERAL (SELECT probability FROM snapshots WHERE market_id = m.id ORDER BY timestamp DESC LIMIT 1) s ON true
-WHERE m.active AND s.probability BETWEEN 0.92 AND 0.99
-AND m.id NOT IN (SELECT DISTINCT market_id FROM positions);"
-```
-
-**Surface if:**
-- Strategy hasn't fired in 24+ hours
-- Markets match criteria but aren't being traded
+- Strategies haven't traded in 24+ hours
+- Many rejected signals
 
 ---
 
-## Settings Reference
+## API Endpoints
 
-### Risk Settings (config.yaml → risk)
-
-| Parameter | Current | Description |
-|-----------|---------|-------------|
-| `max_position_usd` | 100 | Max USD per single position |
-| `max_total_exposure_usd` | 1000 | Max USD across all positions |
-| `max_positions` | 20 | Max number of open positions |
-| `max_drawdown_pct` | 0.15 | Stop trading at 15% drawdown |
-
-### Sizing Settings (config.yaml → sizing)
-
-| Parameter | Current | Description |
-|-----------|---------|-------------|
-| `method` | fixed | `fixed`, `kelly`, or `volatility_scaled` |
-| `fixed_amount_usd` | 25 | Default bet size |
-| `kelly_fraction` | 0.25 | Fraction of Kelly criterion to use |
-
-**Sizing Methods:**
-- **fixed**: Always bet `fixed_amount_usd`
-- **kelly**: Bet based on edge × confidence, scaled by `kelly_fraction`
-- **volatility_scaled**: Smaller bets in volatile markets
-
-### Execution Settings (config.yaml → execution)
-
-| Parameter | Current | Description |
-|-----------|---------|-------------|
-| `default_order_type` | limit | `market`, `limit`, or `spread` |
-| `limit_offset_bps` | 50 | Basis points from mid (50 = 0.5%) |
-| `spread_timeout_seconds` | 30 | Time before crossing spread |
-
-**Order Types:**
-- **market**: Cross spread immediately, guaranteed fill
-- **limit**: Post at mid - offset, may not fill
-- **spread**: Post to capture spread, cross after timeout
-
----
-
-## Common User Requests
-
-| User Says | Action |
-|-----------|--------|
-| "increase bet size to $50" | Edit strategy's `size_usd` parameter |
-| "switch to kelly sizing" | Edit `config.yaml` → `sizing.method: kelly` |
-| "pause trading" | Set `enabled: false` in `deployed_strategies.yaml` |
-| "more aggressive" | Increase `max_position_usd`, `max_total_exposure_usd` |
-| "more conservative" | Decrease limits, lower `max_drawdown_pct` |
-| "use market orders" | Edit `config.yaml` → `execution.default_order_type: market` |
-| "why no trades?" | Check strategy criteria, query matching markets |
-| "reset paper balance" | Query to reset `paper_balances` table |
-
----
-
-## Troubleshooting
-
-| Problem | Diagnosis | Solution |
-|---------|-----------|----------|
-| No signals | Strategy criteria too strict | Check markets matching criteria |
-| All signals rejected | Risk limits hit | Check exposure, position count, drawdown |
-| Executor not running | Container issue | `docker-compose logs api`, restart if needed |
-| Telegram not working | Missing env vars | Check `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/executor/strategies` | List all loaded strategies |
+| `GET /api/executor/strategies/leaderboard` | Performance ranking |
+| `GET /api/executor/strategies/balances` | Per-strategy wallet balances |
+| `GET /api/executor/strategies/{name}/metrics` | Detailed metrics for one strategy |
+| `GET /api/executor/strategies/{name}/debug` | Debug info (funnel, recent decisions) |
+| `GET /api/executor/positions` | List positions |
+| `GET /api/executor/decisions` | Trade decision audit trail |
 
 ---
 
@@ -393,10 +451,13 @@ AND m.id NOT IN (SELECT DISTINCT market_id FROM positions);"
 
 | File | Purpose |
 |------|---------|
+| `strategies.yaml` | **Central config** - all strategy instances |
+| `strategies/types/` | Strategy type classes (6 types) |
+| `strategies/loader.py` | Reads YAML, instantiates strategies |
+| `strategies/performance.py` | Sharpe, drawdown calculations |
 | `config.yaml` | Risk, sizing, execution settings |
-| `deployed_strategies.yaml` | Which strategies are active |
-| `strategies/*.py` | Strategy code files |
-| `strategies/base.py` | Base class for strategies |
+| `cli/debug.py` | CLI debug tool |
+| `cli/deploy.py` | List/validate strategies |
 
 ---
 
@@ -404,8 +465,22 @@ AND m.id NOT IN (SELECT DISTINCT market_id FROM positions);"
 
 | Table | Purpose |
 |-------|---------|
-| `paper_balances` | Paper trading balance |
+| `paper_balances` | Overall paper trading balance |
+| `strategy_balances` | Per-strategy wallet allocation and P&L |
 | `positions` | Open/closed positions |
 | `trade_decisions` | Audit trail of all decisions |
 | `signals` | Generated signals |
 | `executor_trades` | Executed trades |
+
+---
+
+## Common User Requests
+
+| User Says | Action |
+|-----------|--------|
+| "increase bet size to 2%" | Edit `strategies.yaml` → `defaults.size_pct: 0.02` |
+| "add a new strategy" | Add entry to `strategies.yaml` under appropriate type |
+| "pause trading" | Set `enabled: false` in strategy entry |
+| "why isn't X trading?" | Run `python3 -m cli.debug <strategy_name>` |
+| "show leaderboard" | Query strategy_balances ordered by total_pnl |
+| "reset paper balance" | Reset `paper_balances` and `strategy_balances` tables |

@@ -13,7 +13,7 @@ settings:
 risk:
   max_position_usd: 100
   max_total_exposure_usd: 1000
-  max_positions: 20
+  max_positions: 60
   max_drawdown_pct: 0.15
 
 # Default order execution settings

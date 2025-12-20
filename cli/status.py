@@ -21,17 +21,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def load_deployed_strategies() -> list[dict]:
-    """Load strategies from deployed_strategies.yaml."""
-    import yaml
-
-    config_path = Path(__file__).parent.parent / "deployed_strategies.yaml"
-    if not config_path.exists():
+    """Load strategies from strategies.yaml."""
+    try:
+        from strategies.loader import load_strategies
+        strategies = load_strategies()
+        return [
+            {
+                "name": s.name,
+                "type": type(s).__name__,
+                "version": s.version,
+                "enabled": True,
+            }
+            for s in strategies
+        ]
+    except ImportError:
         return []
-
-    with open(config_path) as f:
-        config = yaml.safe_load(f) or {}
-
-    return config.get("strategies", [])
 
 
 def main():
@@ -57,15 +61,15 @@ def main():
     print("DEPLOYED STRATEGIES")
     print("-" * 40)
     if not strategies:
-        print("  No strategies deployed")
-        print("  Use: python -m cli.deploy <strategy_file>")
+        print("  No strategies found")
+        print("  Check strategies.yaml configuration")
     else:
         for s in strategies:
             enabled = "ON " if s.get("enabled", False) else "OFF"
-            path = s.get("path", "unknown")
-            sha = s.get("sha", "unknown")[:8]
-            print(f"  [{enabled}] {path}")
-            print(f"        SHA: {sha} | Deployed: {s.get('deployed_at', 'unknown')[:10]}")
+            name = s.get("name", "unknown")
+            stype = s.get("type", "Strategy")
+            version = s.get("version", "1.0.0")
+            print(f"  [{enabled}] {name} v{version} ({stype})")
     print()
 
     if not has_db:

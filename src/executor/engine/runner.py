@@ -9,7 +9,7 @@ Main loop that orchestrates:
 5. Order execution
 6. Position updates
 
-Strategies are loaded from deployed_strategies.yaml (strategy-as-code).
+Strategies are loaded from strategies.yaml (config-driven).
 All decisions are logged to trade_decisions table for audit trail.
 """
 
@@ -31,14 +31,14 @@ from src.executor.portfolio import PositionManager, RiskManager, PositionSizer
 from src.executor.strategies import get_registry
 from src.executor.strategies.base import MarketData, Signal
 from src.alerts.telegram import alert_trade, alert_error
-from strategies import load_strategy
+from strategies.loader import load_strategies
 from strategies.base import Strategy as FileStrategy
 from .scanner import MarketScanner
 
 logger = logging.getLogger(__name__)
 
-# Path to deployed strategies config
-DEPLOYED_STRATEGIES_PATH = Path(__file__).parent.parent.parent.parent / "deployed_strategies.yaml"
+# Path to strategies config
+STRATEGIES_CONFIG_PATH = Path(__file__).parent.parent.parent.parent / "strategies.yaml"
 
 
 class ExecutorRunner:
@@ -70,7 +70,7 @@ class ExecutorRunner:
         # Paper executor (live executor added later)
         self.paper_executor = PaperExecutor()
 
-        # File-based strategies from deployed_strategies.yaml
+        # Config-driven strategies from strategies.yaml
         self.deployed_strategies: list[FileStrategy] = []
         self._load_deployed_strategies()
 
@@ -86,49 +86,40 @@ class ExecutorRunner:
         signal.signal(signal.SIGTERM, self._handle_shutdown)
 
     def _load_deployed_strategies(self):
-        """Load strategies from deployed_strategies.yaml."""
+        """Load strategies from strategies.yaml (config-driven)."""
         self.deployed_strategies = []
 
-        if not DEPLOYED_STRATEGIES_PATH.exists():
-            logger.info("No deployed_strategies.yaml found, using config.yaml strategies")
+        if not STRATEGIES_CONFIG_PATH.exists():
+            logger.info("No strategies.yaml found, using legacy config.yaml strategies")
             return
 
         try:
-            self._last_strategies_mtime = DEPLOYED_STRATEGIES_PATH.stat().st_mtime
-            with open(DEPLOYED_STRATEGIES_PATH) as f:
-                config = yaml.safe_load(f) or {}
+            self._last_strategies_mtime = STRATEGIES_CONFIG_PATH.stat().st_mtime
 
-            strategies_config = config.get("strategies", [])
-            for entry in strategies_config:
-                if not entry.get("enabled", False):
-                    continue
+            # Use the config-driven loader
+            self.deployed_strategies = load_strategies(
+                config_path=STRATEGIES_CONFIG_PATH,
+                enabled_only=True,
+            )
 
-                path = entry.get("path")
-                if not path:
-                    continue
+            for strategy in self.deployed_strategies:
+                logger.info(
+                    f"Loaded strategy: {strategy.name} v{strategy.version} "
+                    f"({type(strategy).__name__})"
+                )
 
-                strategy = load_strategy(path)
-                if strategy:
-                    self.deployed_strategies.append(strategy)
-                    logger.info(
-                        f"Loaded deployed strategy: {strategy.name} v{strategy.version} "
-                        f"(SHA: {strategy.get_sha()})"
-                    )
-                else:
-                    logger.error(f"Failed to load strategy from: {path}")
-
-            logger.info(f"Loaded {len(self.deployed_strategies)} deployed strategies")
+            logger.info(f"Loaded {len(self.deployed_strategies)} strategies from strategies.yaml")
 
         except Exception as e:
-            logger.error(f"Error loading deployed strategies: {e}", exc_info=True)
+            logger.error(f"Error loading strategies: {e}", exc_info=True)
 
     def _check_strategies_changed(self) -> bool:
-        """Check if deployed_strategies.yaml has been modified."""
-        if not DEPLOYED_STRATEGIES_PATH.exists():
+        """Check if strategies.yaml has been modified."""
+        if not STRATEGIES_CONFIG_PATH.exists():
             return False
 
         try:
-            current_mtime = DEPLOYED_STRATEGIES_PATH.stat().st_mtime
+            current_mtime = STRATEGIES_CONFIG_PATH.stat().st_mtime
             if self._last_strategies_mtime is None:
                 return False
             return current_mtime > self._last_strategies_mtime
@@ -240,7 +231,7 @@ class ExecutorRunner:
         Run all enabled strategies on markets.
 
         Runs both:
-        1. File-based strategies from deployed_strategies.yaml
+        1. Config-driven strategies from strategies.yaml
         2. Legacy config-based strategies from config.yaml (if any)
 
         Args:
@@ -278,7 +269,7 @@ class ExecutorRunner:
             )
             strategy_markets.append(sm)
 
-        # Run file-based strategies from deployed_strategies.yaml
+        # Run config-driven strategies from strategies.yaml
         for strategy in self.deployed_strategies:
             try:
                 # Pre-filter markets

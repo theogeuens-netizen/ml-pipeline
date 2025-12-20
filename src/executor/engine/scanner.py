@@ -166,6 +166,9 @@ class MarketScanner:
             volume_24h=volume_24h,
             liquidity=liquidity,
             category=market.category,
+            category_l1=market.category_l1,
+            category_l2=market.category_l2,
+            category_l3=market.category_l3,
             event_id=market.event_id,
             event_title=market.event_title,
             raw={

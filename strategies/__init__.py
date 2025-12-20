@@ -1,118 +1,46 @@
 """
-Strategy loader for strategy-as-code.
+Strategy loading for config-driven strategies.
 
-Strategies are Python files in the strategies/ directory.
-Each file must define a `strategy` instance at module level.
+Strategies are defined in strategies.yaml and instantiated from
+type classes in strategies/types/.
 
 Usage:
-    from strategies import load_strategy
+    from strategies import load_strategies, get_strategy_by_name
 
-    strategy = load_strategy("strategies/longshot_yes_v1.py")
-    if strategy:
-        for signal in strategy.scan(markets):
-            print(signal)
+    strategies = load_strategies()
+    for s in strategies:
+        signals = list(s.scan(markets))
+
+    # Or load a specific strategy
+    strat = get_strategy_by_name("esports_no_1h")
 """
 
-import importlib.util
-import logging
-from pathlib import Path
-from typing import Optional
-
-from .base import Strategy, Signal, Side, MarketData
-
-logger = logging.getLogger(__name__)
+from strategies.base import Strategy, Signal, Side, MarketData
+from strategies.loader import (
+    load_strategies,
+    get_strategy_by_name,
+    get_strategy_config,
+    list_strategy_names,
+    validate_config,
+)
 
 __all__ = [
+    # Base classes
     "Strategy",
     "Signal",
     "Side",
     "MarketData",
-    "load_strategy",
-    "load_all_strategies",
+    # Loader functions
+    "load_strategies",
+    "get_strategy_by_name",
+    "get_strategy_config",
+    "list_strategy_names",
+    "validate_config",
 ]
 
-
-def load_strategy(path: str) -> Optional[Strategy]:
-    """
-    Load a strategy instance from a Python file.
-
-    The file must define a `strategy` variable at module level
-    that is an instance of Strategy.
-
-    Args:
-        path: Path to the strategy file (e.g., "strategies/my_strategy.py")
-
-    Returns:
-        Strategy instance, or None if loading failed
-    """
-    p = Path(path)
-
-    if not p.exists():
-        logger.error(f"Strategy file not found: {path}")
-        return None
-
-    if not p.suffix == ".py":
-        logger.error(f"Strategy file must be a .py file: {path}")
-        return None
-
-    try:
-        # Create a unique module name based on file path
-        module_name = f"strategies.loaded.{p.stem}"
-
-        spec = importlib.util.spec_from_file_location(module_name, p)
-        if spec is None or spec.loader is None:
-            logger.error(f"Failed to create module spec for: {path}")
-            return None
-
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        # Get the strategy instance
-        strategy = getattr(module, "strategy", None)
-
-        if strategy is None:
-            logger.error(f"No 'strategy' variable defined in: {path}")
-            return None
-
-        if not isinstance(strategy, Strategy):
-            logger.error(f"'strategy' is not a Strategy instance in: {path}")
-            return None
-
-        logger.info(f"Loaded strategy: {strategy.name} v{strategy.version} (SHA: {strategy.get_sha()})")
-        return strategy
-
-    except Exception as e:
-        logger.error(f"Failed to load strategy from {path}: {e}", exc_info=True)
-        return None
-
-
-def load_all_strategies(directory: str = "strategies") -> list[Strategy]:
-    """
-    Load all strategy files from a directory.
-
-    Skips files starting with underscore or named base.py.
-
-    Args:
-        directory: Path to strategies directory
-
-    Returns:
-        List of loaded Strategy instances
-    """
-    strategies = []
-    p = Path(directory)
-
-    if not p.exists():
-        logger.error(f"Strategies directory not found: {directory}")
-        return strategies
-
-    for file in p.glob("*.py"):
-        # Skip private files and base.py
-        if file.name.startswith("_") or file.name == "base.py":
-            continue
-
-        strategy = load_strategy(str(file))
-        if strategy:
-            strategies.append(strategy)
-
-    logger.info(f"Loaded {len(strategies)} strategies from {directory}")
-    return strategies
+# Performance tracking (requires sqlalchemy)
+try:
+    from strategies.performance import PerformanceTracker, StrategyMetrics
+    __all__.extend(["PerformanceTracker", "StrategyMetrics"])
+except ImportError:
+    pass  # sqlalchemy not available
