@@ -63,6 +63,7 @@ app.conf.update(
         "src.tasks.snapshots.snapshot_tier_batch": {"queue": "snapshots"},
         "src.tasks.snapshots.warm_gamma_cache": {"queue": "snapshots"},
         "src.tasks.discovery.*": {"queue": "discovery"},
+        "src.tasks.categorization.*": {"queue": "categorization"},
     },
     # Default queue
     task_default_queue="default",
@@ -82,6 +83,8 @@ app.conf.beat_schedule = {
         "task": "src.tasks.discovery.discover_markets",
         "schedule": crontab(minute=0),  # Every hour at :00
     },
+    # NOTE: Rule-based categorization disabled - use /categorize command manually
+    # The rules need improvement before running automatically
     # Reassign tiers every 5 minutes
     "update-tiers": {
         "task": "src.tasks.discovery.update_market_tiers",
@@ -155,4 +158,4 @@ app.conf.beat_schedule = {
 app.autodiscover_tasks(["src.tasks"])
 
 # Explicitly import to ensure registration
-from src.tasks import discovery, snapshots, alerts  # noqa: F401, E402
+from src.tasks import discovery, snapshots, alerts, categorization  # noqa: F401, E402

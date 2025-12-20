@@ -90,6 +90,14 @@ class Market(Base):
     competitive: Mapped[Optional[float]] = mapped_column(Numeric(5, 4))
     enable_order_book: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Category taxonomy (assigned via rules or Claude)
+    category_l1: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # Domain
+    category_l2: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # Sub-domain
+    category_l3: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # Market structure
+    categorized_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    categorization_method: Mapped[Optional[str]] = mapped_column(String(20), index=True)  # 'rule', 'claude', 'event'
+    matched_rule_id: Mapped[Optional[int]] = mapped_column(ForeignKey("categorization_rules.id"))
+
     # Timestamps
     first_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -321,3 +329,69 @@ class TierTransition(Base):
 
     # Relationship
     market: Mapped["Market"] = relationship(back_populates="tier_transitions")
+
+
+class CategorizationRule(Base):
+    """
+    Database-stored categorization rules for pattern matching.
+
+    Rules are loaded at runtime and applied to uncategorized markets.
+    Stats track accuracy for validation and improvement.
+    """
+    __tablename__ = "categorization_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    l1: Mapped[str] = mapped_column(String(50))
+    l2: Mapped[str] = mapped_column(String(50))
+
+    # Matching criteria
+    keywords: Mapped[dict] = mapped_column(JSONB)  # ["bitcoin", "btc"]
+    negative_keywords: Mapped[Optional[dict]] = mapped_column(JSONB)  # Exclusions
+    l3_patterns: Mapped[Optional[dict]] = mapped_column(JSONB)  # {"SPREAD": ["pattern"]}
+    l3_default: Mapped[Optional[str]] = mapped_column(String(50))
+
+    # Stats (updated by validation)
+    times_matched: Mapped[int] = mapped_column(Integer, default=0)
+    times_validated: Mapped[int] = mapped_column(Integer, default=0)
+    times_correct: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Meta
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    @property
+    def accuracy(self) -> Optional[float]:
+        """Calculate accuracy from validation stats."""
+        if self.times_validated > 0:
+            return self.times_correct / self.times_validated
+        return None
+
+
+class RuleValidation(Base):
+    """
+    Track validation results for categorization rules.
+
+    Used to measure and improve rule accuracy over time.
+    """
+    __tablename__ = "rule_validations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market_id: Mapped[int] = mapped_column(ForeignKey("markets.id"), index=True)
+    rule_id: Mapped[Optional[int]] = mapped_column(ForeignKey("categorization_rules.id"), index=True)
+
+    # What rule predicted
+    rule_l1: Mapped[Optional[str]] = mapped_column(String(50))
+    rule_l2: Mapped[Optional[str]] = mapped_column(String(50))
+    rule_l3: Mapped[Optional[str]] = mapped_column(String(50))
+
+    # Ground truth (from Claude or human)
+    correct_l1: Mapped[Optional[str]] = mapped_column(String(50))
+    correct_l2: Mapped[Optional[str]] = mapped_column(String(50))
+    correct_l3: Mapped[Optional[str]] = mapped_column(String(50))
+
+    # Result
+    is_correct: Mapped[Optional[bool]] = mapped_column(Boolean)
+    validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    validated_by: Mapped[Optional[str]] = mapped_column(String(50))  # 'claude', 'human'

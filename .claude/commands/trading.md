@@ -1,3 +1,7 @@
+---
+description: Enter trading CLI mode
+---
+
 Read /home/theo/polymarket-ml/TRADING_CLI.md and follow its instructions exactly.
 
 Enter Trading CLI mode:

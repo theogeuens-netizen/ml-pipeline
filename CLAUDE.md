@@ -120,6 +120,11 @@ docker-compose ps
 | `src/alerts/telegram.py` | Telegram alert notifications |
 | `src/executor/models.py` | Executor models (incl. TradeDecision) |
 | `src/tasks/alerts.py` | Daily summary Celery task |
+| `.claude/commands/trading.md` | Trading CLI slash command |
+| `.claude/commands/categorize.md` | Categorization slash command |
+| `TRADING_CLI.md` | Trading CLI full reference |
+| `src/services/rule_categorizer.py` | Rule-based market categorization |
+| `cli/categorize_helpers.py` | Categorization CLI helpers |
 
 ---
 
@@ -530,6 +535,84 @@ cat deployed_strategies.yaml
    - Position close (with P&L)
    - Critical errors
    - Daily summary (9 AM UTC)
+
+---
+
+## Slash Commands Reference
+
+Claude Code slash commands for interacting with the system. Type `/command` to invoke.
+
+### `/trading` - Trading CLI Mode
+
+Interactive trading interface for managing strategies, positions, and system status.
+
+**Startup**: Displays command menu, enters CLI mode until you say "exit"
+
+| Command | Description |
+|---------|-------------|
+| `status` | Show balance, positions, P&L, recent decisions |
+| `strategies` | List deployed strategies with parameters |
+| `create` | Create new strategy from natural language description |
+| `adjust` | Change strategy parameters or risk settings |
+| `deploy` | Deploy/undeploy a strategy |
+| `backtest` | Test strategy against historical data |
+| `logs` | Show recent errors or activity |
+| `advise` | Switch to proactive advisor mode (recommendations) |
+
+**Example session:**
+```
+> /trading
+> status
+> strategies
+> adjust longshot_yes_v1 size_usd=50
+> backtest strategies/my_new_strategy.py --days 14
+> exit
+```
+
+**Key files referenced:**
+- `TRADING_CLI.md` - Full command reference and queries
+- `config.yaml` - Risk, sizing, execution settings
+- `deployed_strategies.yaml` - Active strategies
+- `strategies/*.py` - Strategy code files
+
+---
+
+### `/categorize` - Market Categorization
+
+Categorize Polymarket markets into L1/L2/L3 taxonomy.
+
+| Command | Description |
+|---------|-------------|
+| `stats` | Show categorization statistics (total, by rules, uncategorized) |
+| `batch [n]` | Categorize n uncategorized markets (default: 100) |
+| `validate [n]` | Validate n random rule-categorized markets |
+| `rules` | Show rule performance stats |
+| `run-rules` | Run rule engine on uncategorized markets |
+
+**Example session:**
+```
+> /categorize stats
+
+=== CATEGORIZATION STATS ===
+Total markets: 14,124
+By rules: 1,150 (8.1%)
+By Claude: 858 (6.1%)
+Uncategorized: 0
+
+> /categorize batch 50
+[Categories 50 markets, outputs JSON, saves to DB]
+
+> /categorize validate 30
+[Validates 30 rule-categorized markets for accuracy]
+```
+
+**Taxonomy (L1 categories):**
+CRYPTO, SPORTS, ESPORTS, POLITICS, ECONOMICS, BUSINESS, ENTERTAINMENT, WEATHER, SCIENCE, TECH, LEGAL, OTHER
+
+**Key files:**
+- `.claude/commands/categorize.md` - Full command reference
+- `src/services/rule_categorizer.py` - Rule engine
+- `cli/categorize_helpers.py` - CLI helper functions
 
 ---
 

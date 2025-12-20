@@ -120,6 +120,7 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
 
 
+
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""

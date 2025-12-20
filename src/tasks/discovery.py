@@ -112,8 +112,8 @@ async def _discover_markets_async() -> dict:
                     continue
                 seen_condition_ids.add(condition_id)
 
-                # Volume filter moved to T0→T1 transition (in update_market_tiers)
-                # This allows markets to build volume before being filtered out
+                # Volume filter at T1→T2 transition (in update_market_tiers)
+                # Markets have until 12h before close to build volume
                 volume_24h = float(market_data.get("volume24hr") or 0)
 
                 # Filter: must have orderbook enabled
@@ -241,9 +241,10 @@ def update_market_tiers() -> dict:
     As markets approach their resolution time, they move to higher tiers
     for more frequent data collection.
 
-    Volume filter is applied at T0→T1 transition:
+    Volume filter is applied at T1→T2 transition:
     - Markets with <$100 24h volume are deactivated instead of promoted
-    - This gives markets time to build volume before being filtered
+    - This gives markets until 12h before close to build volume
+    - Saves WebSocket bandwidth (only T2+ gets WebSocket connections)
 
     Returns:
         Dictionary with updated count and deactivated count
@@ -276,8 +277,9 @@ def update_market_tiers() -> dict:
                 if market.end_date:
                     hours_to_close = (market.end_date - now).total_seconds() / 3600
 
-                # Volume filter at T0→T1 transition
-                if market.tier == 0 and new_tier >= 1:
+                # Volume filter at T1→T2 transition (before WebSocket)
+                # Markets have until 12h before close to build volume
+                if market.tier <= 1 and new_tier >= 2:
                     volume_24h = volume_by_condition.get(market.condition_id, 0)
                     if volume_24h < settings.ml_volume_threshold:
                         # Record deactivation as tier transition
@@ -292,11 +294,12 @@ def update_market_tiers() -> dict:
                             reason="low_volume",
                         )
                         session.add(transition)
-                        # Deactivate low-volume market instead of promoting
+                        # Deactivate low-volume market instead of promoting to T2+
+                        # This saves WebSocket bandwidth (only T2+ gets WS)
                         market.active = False
                         deactivated += 1
                         logger.debug(
-                            "Market deactivated (low volume at T0→T1)",
+                            "Market deactivated (low volume at T1→T2)",
                             market=market.slug,
                             volume_24h=volume_24h,
                             threshold=settings.ml_volume_threshold,
