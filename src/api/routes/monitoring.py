@@ -813,3 +813,202 @@ async def get_redis_stats():
         }
     finally:
         r.close()
+
+
+@router.get("/monitoring/lifecycle-status")
+async def get_lifecycle_status(db: Session = Depends(get_db)):
+    """
+    Get distribution of market lifecycle states.
+
+    Shows breakdown of trading status and UMA resolution status across all markets.
+    """
+    from src.db.models import Market
+
+    # Get counts by trading status
+    trading_status_query = text("""
+        SELECT
+            CASE
+                WHEN resolved = true THEN 'resolved'
+                WHEN closed = true THEN 'closed'
+                WHEN accepting_orders = false THEN 'suspended'
+                WHEN active = true THEN 'trading'
+                ELSE 'unknown'
+            END as status,
+            COUNT(*) as count
+        FROM markets
+        GROUP BY 1
+        ORDER BY count DESC
+    """)
+    trading_result = db.execute(trading_status_query)
+    trading_status = {row.status: row.count for row in trading_result}
+
+    # Get counts by UMA resolution status
+    uma_status_query = text("""
+        SELECT
+            COALESCE(uma_resolution_status, 'none') as status,
+            COUNT(*) as count
+        FROM markets
+        WHERE active = true OR resolved = true
+        GROUP BY 1
+        ORDER BY count DESC
+    """)
+    uma_result = db.execute(uma_status_query)
+    uma_status = {row.status: row.count for row in uma_result}
+
+    # Get markets stuck in pending states
+    pending_query = text("""
+        SELECT COUNT(*) as count
+        FROM markets
+        WHERE active = true
+        AND resolved = false
+        AND closed = true
+        AND end_date < NOW() - INTERVAL '24 hours'
+    """)
+    pending_count = db.execute(pending_query).scalar()
+
+    # Get recently closed markets (last 24h)
+    recent_closed_query = text("""
+        SELECT COUNT(*) as count
+        FROM markets
+        WHERE closed_at > NOW() - INTERVAL '24 hours'
+    """)
+    recent_closed = db.execute(recent_closed_query).scalar()
+
+    # Get recently resolved markets (last 24h)
+    recent_resolved_query = text("""
+        SELECT COUNT(*) as count
+        FROM markets
+        WHERE resolved_at > NOW() - INTERVAL '24 hours'
+    """)
+    recent_resolved = db.execute(recent_resolved_query).scalar()
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "trading_status_distribution": trading_status,
+        "uma_status_distribution": uma_status,
+        "alerts": {
+            "markets_stuck_pending_24h": pending_count or 0,
+        },
+        "recent_activity_24h": {
+            "closed": recent_closed or 0,
+            "resolved": recent_resolved or 0,
+        },
+    }
+
+
+@router.get("/monitoring/lifecycle-anomalies")
+async def get_lifecycle_anomalies(
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, le=200),
+):
+    """
+    Find markets with anomalous lifecycle states.
+
+    Detects:
+    - Markets past end_date but not closed
+    - Markets closed but not resolved for >24h
+    - Markets with UMA status but not closed
+    - Resolved markets with unknown outcome
+    """
+    from src.db.models import Market
+
+    anomalies = []
+
+    # Markets past end_date but not closed
+    past_not_closed = db.execute(text("""
+        SELECT id, condition_id, slug, end_date, closed, resolved
+        FROM markets
+        WHERE active = true
+        AND end_date < NOW() - INTERVAL '1 hour'
+        AND closed = false
+        AND resolved = false
+        LIMIT :limit
+    """), {"limit": limit // 4})
+
+    for row in past_not_closed:
+        anomalies.append({
+            "type": "past_end_date_not_closed",
+            "market_id": row.id,
+            "slug": row.slug,
+            "end_date": row.end_date.isoformat() if row.end_date else None,
+            "severity": "high",
+        })
+
+    # Markets closed but not resolved for >24h
+    closed_not_resolved = db.execute(text("""
+        SELECT id, condition_id, slug, closed_at, end_date
+        FROM markets
+        WHERE closed = true
+        AND resolved = false
+        AND closed_at < NOW() - INTERVAL '24 hours'
+        LIMIT :limit
+    """), {"limit": limit // 4})
+
+    for row in closed_not_resolved:
+        anomalies.append({
+            "type": "closed_24h_not_resolved",
+            "market_id": row.id,
+            "slug": row.slug,
+            "closed_at": row.closed_at.isoformat() if row.closed_at else None,
+            "severity": "medium",
+        })
+
+    # Resolved but no outcome
+    resolved_no_outcome = db.execute(text("""
+        SELECT id, condition_id, slug, resolved_at, outcome
+        FROM markets
+        WHERE resolved = true
+        AND (outcome IS NULL OR outcome = 'UNKNOWN')
+        LIMIT :limit
+    """), {"limit": limit // 4})
+
+    for row in resolved_no_outcome:
+        anomalies.append({
+            "type": "resolved_unknown_outcome",
+            "market_id": row.id,
+            "slug": row.slug,
+            "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+            "severity": "high",
+        })
+
+    # Markets in disputed state for >48h
+    long_disputed = db.execute(text("""
+        SELECT id, condition_id, slug, uma_resolution_status, uma_status_updated_at
+        FROM markets
+        WHERE uma_resolution_status = 'disputed'
+        AND uma_status_updated_at < NOW() - INTERVAL '48 hours'
+        LIMIT :limit
+    """), {"limit": limit // 4})
+
+    for row in long_disputed:
+        anomalies.append({
+            "type": "disputed_48h",
+            "market_id": row.id,
+            "slug": row.slug,
+            "uma_status_updated_at": row.uma_status_updated_at.isoformat() if row.uma_status_updated_at else None,
+            "severity": "info",
+        })
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "total_anomalies": len(anomalies),
+        "anomalies": anomalies,
+    }
+
+
+@router.get("/monitoring/market/{market_id}/lifecycle")
+async def get_market_lifecycle(
+    market_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Get detailed lifecycle information for a specific market.
+    """
+    from src.db.models import Market
+    from src.services.market_lifecycle import get_lifecycle_summary
+
+    market = db.get(Market, market_id)
+    if not market:
+        return {"error": "Market not found"}
+
+    return get_lifecycle_summary(market)

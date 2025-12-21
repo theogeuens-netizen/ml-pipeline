@@ -51,8 +51,8 @@ class LongshotStrategy(Strategy):
             if prob < self.min_probability or prob > self.max_probability:
                 continue
 
-            # Time window
-            if m.hours_to_close is None or m.hours_to_close > self.max_hours:
+            # Time window - must be between 0 and max_hours
+            if m.hours_to_close is None or m.hours_to_close <= 0 or m.hours_to_close > self.max_hours:
                 continue
 
             # Liquidity

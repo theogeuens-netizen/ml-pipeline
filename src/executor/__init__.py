@@ -2,7 +2,7 @@
 Polymarket Executor - Trading execution system.
 
 Provides:
-- Strategy framework with 5 built-in strategies
+- Strategy framework with config-driven strategies
 - Paper and live trading modes
 - Position and risk management
 - Real-time signal generation and execution
@@ -10,7 +10,7 @@ Provides:
 Usage:
     from src.executor.config import get_config, TradingMode
     from src.executor.execution import get_executor, Executor
-    from src.executor.strategies import get_registry, Signal
+    from strategies.base import Strategy, Signal
     from src.executor.engine import ExecutorRunner
 """
 
@@ -29,10 +29,10 @@ from src.executor.execution import (
     PaperExecutor,
     LiveExecutor,
 )
-from src.executor.strategies import (
+from strategies.base import (
     Strategy,
     Signal,
-    get_registry,
+    MarketData,
 )
 from src.executor.engine import (
     ExecutorRunner,
@@ -53,7 +53,7 @@ __all__ = [
     # Strategies
     "Strategy",
     "Signal",
-    "get_registry",
+    "MarketData",
     # Engine
     "ExecutorRunner",
     "MarketScanner",

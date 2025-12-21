@@ -64,6 +64,10 @@ class MarketData:
     volume_24h: Optional[float] = None
     liquidity: Optional[float] = None
 
+    # Orderbook depth (for realistic execution simulation)
+    bid_depth_10: Optional[float] = None  # Total bid depth within 10 cents of best bid
+    ask_depth_10: Optional[float] = None  # Total ask depth within 10 cents of best ask
+
     # Categories and metadata
     category: Optional[str] = None
     category_l1: Optional[str] = None  # e.g., CRYPTO, SPORTS, POLITICS

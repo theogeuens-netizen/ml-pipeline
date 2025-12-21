@@ -244,6 +244,36 @@ export interface TaskActivity {
   }[]
 }
 
+export interface LifecycleStatus {
+  timestamp: string
+  trading_status_distribution: Record<string, number>
+  uma_status_distribution: Record<string, number>
+  alerts: {
+    markets_stuck_pending_24h: number
+  }
+  recent_activity_24h: {
+    closed: number
+    resolved: number
+  }
+}
+
+export interface LifecycleAnomaly {
+  type: string
+  market_id: number
+  slug: string
+  end_date?: string | null
+  closed_at?: string | null
+  resolved_at?: string | null
+  uma_status_updated_at?: string | null
+  severity: 'high' | 'medium' | 'info'
+}
+
+export interface LifecycleAnomalies {
+  timestamp: string
+  total_anomalies: number
+  anomalies: LifecycleAnomaly[]
+}
+
 export interface RedisStats {
   timestamp: string
   memory_used_mb: number
@@ -541,6 +571,10 @@ export const api = {
   getTierTransitions: (hours = 1) => fetchJson<TierTransitions>(`/api/monitoring/tier-transitions?hours=${hours}`),
   getTaskActivity: (limit = 50) => fetchJson<TaskActivity>(`/api/monitoring/task-activity?limit=${limit}`),
   getRedisStats: () => fetchJson<RedisStats>('/api/monitoring/redis-stats'),
+
+  // Lifecycle monitoring endpoints
+  getLifecycleStatus: () => fetchJson<LifecycleStatus>('/api/monitoring/lifecycle-status'),
+  getLifecycleAnomalies: (limit = 50) => fetchJson<LifecycleAnomalies>(`/api/monitoring/lifecycle-anomalies?limit=${limit}`),
 
   // Database browser endpoints
   getTables: () => fetchJson<{ tables: TableInfo[] }>('/api/database/tables'),

@@ -28,11 +28,9 @@ from src.executor.config import ExecutorConfig, TradingMode, get_config, reload_
 from src.executor.execution.paper import PaperExecutor, OrderbookState
 from src.executor.models import Signal as SignalModel, SignalStatus, TradeDecision
 from src.executor.portfolio import PositionManager, RiskManager, PositionSizer
-from src.executor.strategies import get_registry
-from src.executor.strategies.base import MarketData, Signal
 from src.alerts.telegram import alert_trade, alert_error
 from strategies.loader import load_strategies
-from strategies.base import Strategy as FileStrategy
+from strategies.base import Strategy, MarketData, Signal
 from .scanner import MarketScanner
 
 logger = logging.getLogger(__name__)
@@ -71,7 +69,7 @@ class ExecutorRunner:
         self.paper_executor = PaperExecutor()
 
         # Config-driven strategies from strategies.yaml
-        self.deployed_strategies: list[FileStrategy] = []
+        self.deployed_strategies: list[Strategy] = []
         self._load_deployed_strategies()
 
         # State
@@ -192,6 +190,15 @@ class ExecutorRunner:
                 markets = self.scanner.get_scannable_markets(db)
                 logger.info(f"Scanning {len(markets)} markets")
 
+                # Build market depth map for execution (use real orderbook data)
+                market_depth_map = {
+                    m.id: (
+                        m.bid_depth_10 if m.bid_depth_10 else 1000.0,
+                        m.ask_depth_10 if m.ask_depth_10 else 1000.0
+                    )
+                    for m in markets
+                }
+
                 # Get balance
                 balance = self.paper_executor.get_balance()
 
@@ -201,8 +208,8 @@ class ExecutorRunner:
                 # Process signals through risk manager
                 approved_signals = self._process_signals(signals, balance, db)
 
-                # Execute approved signals
-                self._execute_signals(approved_signals, db)
+                # Execute approved signals with real market depth
+                self._execute_signals(approved_signals, market_depth_map, db)
 
                 # Update position prices
                 self._update_positions(markets, db)
@@ -243,39 +250,13 @@ class ExecutorRunner:
         """
         signals = []
 
-        # Convert MarketData from executor format to strategies format
-        # (They share the same structure now)
-        from strategies.base import MarketData as StrategyMarketData
-        strategy_markets = []
-        for m in markets:
-            sm = StrategyMarketData(
-                id=m.id,
-                condition_id=m.condition_id,
-                question=m.question,
-                yes_token_id=m.yes_token_id,
-                no_token_id=m.no_token_id,
-                price=m.price,
-                best_bid=m.best_bid,
-                best_ask=m.best_ask,
-                spread=m.spread,
-                hours_to_close=m.hours_to_close,
-                end_date=m.end_date,
-                volume_24h=m.volume_24h,
-                liquidity=m.liquidity,
-                category=m.category,
-                event_id=m.event_id,
-                price_history=m.price_history,
-                snapshot=m.raw,  # Pass raw data as snapshot for audit
-            )
-            strategy_markets.append(sm)
-
         # Run config-driven strategies from strategies.yaml
         for strategy in self.deployed_strategies:
             try:
                 # Pre-filter markets
-                filtered_markets = [m for m in strategy_markets if strategy.filter(m)]
+                filtered_markets = [m for m in markets if strategy.filter(m)]
                 logger.debug(
-                    f"Strategy {strategy.name}: {len(filtered_markets)}/{len(strategy_markets)} markets after filter"
+                    f"Strategy {strategy.name}: {len(filtered_markets)}/{len(markets)} markets after filter"
                 )
 
                 # Run strategy
@@ -289,40 +270,6 @@ class ExecutorRunner:
             except Exception as e:
                 logger.error(f"Error running strategy {strategy.name}: {e}", exc_info=True)
                 alert_error(f"strategy.{strategy.name}", str(e))
-
-        # Fall back to legacy config-based strategies if no deployed strategies
-        if not self.deployed_strategies:
-            registry = get_registry()
-            for strategy_name, strategy_config in self.config.strategies.items():
-                if not strategy_config.enabled:
-                    continue
-
-                try:
-                    # Get or create strategy instance
-                    strategy = registry.get_or_create_strategy(
-                        strategy_name,
-                        strategy_config.params,
-                    )
-
-                    if strategy is None:
-                        logger.warning(f"Strategy not found: {strategy_name}")
-                        continue
-
-                    # Pre-filter markets
-                    filtered_markets = [m for m in markets if strategy.filter(m)]
-                    logger.debug(
-                        f"Strategy {strategy_name}: {len(filtered_markets)}/{len(markets)} markets after filter"
-                    )
-
-                    # Run strategy
-                    for signal in strategy.scan(filtered_markets):
-                        signal.strategy_name = strategy_name
-                        signals.append(signal)
-                        self.signals_generated += 1
-
-                except Exception as e:
-                    logger.error(f"Error running strategy {strategy_name}: {e}", exc_info=True)
-                    alert_error(f"strategy.{strategy_name}", str(e))
 
         logger.info(f"Strategies generated {len(signals)} signals")
         return signals
@@ -413,6 +360,7 @@ class ExecutorRunner:
     def _execute_signals(
         self,
         approved_signals: list[tuple[Signal, SignalModel, TradeDecision]],
+        market_depth_map: dict[int, tuple[float, float]],
         db: Session,
     ):
         """
@@ -422,17 +370,24 @@ class ExecutorRunner:
 
         Args:
             approved_signals: List of (Signal, SignalModel, TradeDecision) tuples
+            market_depth_map: Dict of market_id -> (bid_depth_10, ask_depth_10)
             db: Database session
         """
         for signal, signal_model, decision in approved_signals:
             try:
-                # Build orderbook state (in production, would fetch real orderbook)
+                # Get real orderbook depth from market data
+                bid_depth, ask_depth = market_depth_map.get(
+                    signal.market_id,
+                    (1000.0, 1000.0)  # Fallback if not available
+                )
+
+                # Build orderbook state with real depth data
                 orderbook = OrderbookState(
                     best_bid=signal.best_bid,
                     best_ask=signal.best_ask,
                     mid_price=(signal.best_bid + signal.best_ask) / 2 if signal.best_bid and signal.best_ask else signal.price_at_signal,
-                    bid_depth_10=1000,  # Simulated
-                    ask_depth_10=1000,
+                    bid_depth_10=bid_depth,
+                    ask_depth_10=ask_depth,
                     spread=signal.best_ask - signal.best_bid if signal.best_bid and signal.best_ask else 0.01,
                 )
 
@@ -462,12 +417,26 @@ class ExecutorRunner:
                         f"Signal executed: {result.executed_shares:.2f} shares @ ${result.executed_price:.4f}"
                     )
 
-                    # Send Telegram alert
+                    # Send Telegram alert with full market details
                     side_str = signal.side.value if hasattr(signal.side, 'value') else signal.side
+
+                    # Get market title from database
+                    from src.db.models import Market
+                    market = db.query(Market).filter(Market.id == signal.market_id).first()
+                    market_title = market.question if market else f"Market {signal.market_id}"
+
+                    # Determine token side (YES or NO) from token_id
+                    if market:
+                        token_side = "YES" if signal.token_id == market.yes_token_id else "NO"
+                    else:
+                        token_side = "YES"  # Default
+
                     alert_trade(
                         strategy=signal.strategy_name,
                         side=side_str,
-                        market=signal.reason,
+                        market_title=market_title,
+                        market_id=signal.market_id,
+                        token_side=token_side,
                         price=result.executed_price,
                         size=float(signal_model.suggested_size_usd or 0),
                         edge=signal.edge,
@@ -493,11 +462,48 @@ class ExecutorRunner:
         """
         Update current prices for open positions.
 
+        Also fetches prices for positions in closed (but not resolved) markets,
+        which wouldn't be in the scanner results but still need price tracking.
+
         Args:
-            markets: Current market data
+            markets: Current market data from scanner
             db: Database session
         """
+        from src.db.models import Market, Snapshot
+        from src.executor.models import Position, PositionStatus
+        from sqlalchemy import desc
+
+        # Start with prices from scanned markets
         price_updates = {m.id: m.price for m in markets}
+
+        # Find open positions in markets NOT in the scanned list
+        # These could be in closed (but not resolved) markets
+        scanned_market_ids = set(price_updates.keys())
+        open_positions = db.query(Position).filter(
+            Position.is_paper == True,
+            Position.status == PositionStatus.OPEN.value,
+        ).all()
+
+        missing_market_ids = set()
+        for pos in open_positions:
+            if pos.market_id not in scanned_market_ids:
+                missing_market_ids.add(pos.market_id)
+
+        # Fetch latest prices for missing markets from snapshots
+        if missing_market_ids:
+            for market_id in missing_market_ids:
+                # Get most recent snapshot for this market
+                latest_snapshot = db.query(Snapshot).filter(
+                    Snapshot.market_id == market_id,
+                ).order_by(desc(Snapshot.timestamp)).first()
+
+                if latest_snapshot and latest_snapshot.price:
+                    price_updates[market_id] = float(latest_snapshot.price)
+                    logger.debug(
+                        f"Updated price for closed market {market_id} from snapshot: "
+                        f"${latest_snapshot.price:.4f}"
+                    )
+
         self.position_manager.update_prices(price_updates, db)
 
     def stop(self):
@@ -549,9 +555,29 @@ class ExecutorRunner:
 
 def main():
     """Entry point for running the executor."""
+    import sys
     import structlog
+
+    # Configure basic logging to stdout
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        stream=sys.stdout,
+    )
+
+    # Configure structlog
     structlog.configure(
+        processors=[
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.dev.ConsoleRenderer(),
+        ],
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
     )
 
     logger.info("Starting Polymarket Executor...")

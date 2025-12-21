@@ -295,10 +295,17 @@ class GammaClient(BaseClient):
             "start_date": GammaClient.parse_datetime(market.get("startDate")),
             "end_date": GammaClient.parse_datetime(market.get("endDate")),
             "created_at": GammaClient.parse_datetime(market.get("createdAt")),
-            # Status
+            # Status (basic)
             "active": market.get("active", True),
             "closed": market.get("closed", False),
             "resolved": market.get("resolved", False),
+            # Trading Status (for lifecycle tracking)
+            "accepting_orders": market.get("acceptingOrders", True),
+            "accepting_orders_timestamp": GammaClient.parse_datetime(market.get("acceptingOrdersTimestamp")),
+            "closed_time": GammaClient.parse_datetime(market.get("closedTime")),
+            # UMA Resolution Status (for resolution tracking)
+            # Values: null, "proposed", "disputed", "resolved", "flagged"
+            "uma_resolution_status": market.get("umaResolutionStatus"),
             # Metadata
             "category": market.get("category"),
             "neg_risk": market.get("negRisk", False),
@@ -429,3 +436,36 @@ class SyncGammaClient(SyncBaseClient):
                 error=str(e),
             )
             return None
+
+    def get_closed_markets(self, limit: int = 500, days_back: int = 7) -> list[dict[str, Any]]:
+        """
+        Fetch recently closed markets to capture resolution data.
+
+        This is critical for determining market outcomes before they're
+        removed from the API. Closed markets have outcomePrices set to
+        0/1 indicating the resolution (YES=1 means YES won, NO=1 means NO won).
+
+        Args:
+            limit: Maximum results to fetch
+            days_back: Only fetch markets that ended within this many days
+
+        Returns:
+            List of closed market dictionaries with resolution prices
+        """
+        from datetime import datetime, timedelta
+
+        # Calculate date filter to get recently closed markets
+        min_date = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+
+        params = {
+            "closed": "true",
+            "limit": limit,
+            "end_date_min": min_date,
+        }
+        try:
+            markets = self.get("/markets", params)
+            logger.debug("Fetched closed markets", count=len(markets) if markets else 0, min_date=min_date)
+            return markets or []
+        except Exception as e:
+            logger.warning("Failed to fetch closed markets", error=str(e))
+            return []

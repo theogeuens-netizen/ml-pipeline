@@ -74,6 +74,18 @@ class Market(Base):
     outcome: Mapped[Optional[str]] = mapped_column(String(20))  # YES/NO/INVALID
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
+    # Trading Status (from Gamma API)
+    # These track whether the market is open for trading, separate from resolution
+    closed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    accepting_orders: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    accepting_orders_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # UMA Resolution Status (from Gamma API)
+    # Values: null (not started), "proposed" (in challenge window), "disputed", "resolved", "flagged"
+    uma_resolution_status: Mapped[Optional[str]] = mapped_column(String(20), index=True)
+    uma_status_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
     # Collection tracking
     tier: Mapped[int] = mapped_column(SmallInteger, default=0, index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
@@ -395,3 +407,91 @@ class RuleValidation(Base):
     is_correct: Mapped[Optional[bool]] = mapped_column(Boolean)
     validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     validated_by: Mapped[Optional[str]] = mapped_column(String(50))  # 'claude', 'human'
+
+
+# ============================================================================
+# HISTORICAL DATA MODELS (for backtesting)
+# ============================================================================
+# These tables contain migrated data from futarchy's PostgreSQL database.
+# They are separate from polymarket-ml's operational data and are used
+# only for backtesting, not for XGBoost training.
+# ============================================================================
+
+
+class HistoricalMarket(Base):
+    """
+    Historical market data from futarchy (for backtesting).
+
+    This is separate from the 'markets' table which contains
+    polymarket-ml's high-granularity operational data.
+    """
+    __tablename__ = "historical_markets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)  # Polymarket condition_id
+    question: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    close_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+
+    # Categories
+    macro_category: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # Crypto, Sports, Politics
+    micro_category: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # Bitcoin, NFL, Trump
+
+    # Market metrics
+    volume: Mapped[Optional[float]] = mapped_column(Numeric(20, 2))
+    liquidity: Mapped[Optional[float]] = mapped_column(Numeric(20, 2))
+
+    # Resolution data (critical for backtesting)
+    resolution_status: Mapped[Optional[str]] = mapped_column(String(20), index=True)  # resolved, unresolved, disputed
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    winner: Mapped[Optional[str]] = mapped_column(String(50))  # YES, NO, or specific outcome name
+    resolved_early: Mapped[Optional[bool]] = mapped_column(Boolean)
+
+    # Metadata
+    platform: Mapped[str] = mapped_column(String(20), default="polymarket")
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    price_snapshots: Mapped[list["HistoricalPriceSnapshot"]] = relationship(
+        back_populates="market", cascade="all, delete-orphan"
+    )
+
+
+class HistoricalPriceSnapshot(Base):
+    """
+    Historical price snapshot from futarchy (for backtesting).
+
+    This is separate from the 'snapshots' table which contains
+    polymarket-ml's high-granularity feature data.
+    """
+    __tablename__ = "historical_price_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market_id: Mapped[int] = mapped_column(ForeignKey("historical_markets.id", ondelete="CASCADE"), index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    # OHLC prices (0-1 scale for Polymarket)
+    price: Mapped[Optional[float]] = mapped_column(Numeric(10, 6))  # Close price
+    open_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 6))
+    high_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 6))
+    low_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 6))
+
+    # Bid/Ask
+    bid_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 6))
+    ask_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 6))
+
+    # Volume
+    volume: Mapped[Optional[float]] = mapped_column(Numeric(20, 2))
+
+    # Relationships
+    market: Mapped["HistoricalMarket"] = relationship(back_populates="price_snapshots")
+
+    __table_args__ = (
+        # Unique constraint to prevent duplicate snapshots
+        {"sqlite_autoincrement": True},
+    )
+
+
+# Alias for backwards compatibility with data.py imports
+HistoricalMarketModel = HistoricalMarket
+HistoricalPriceSnapshotModel = HistoricalPriceSnapshot

@@ -359,6 +359,9 @@ class PaperExecutor:
         """
         Update paper balance.
 
+        High water mark is based on total portfolio value (cash + positions),
+        not just cash balance, to be consistent with drawdown calculation.
+
         Args:
             db: Database session
             change: Amount to add (negative for deductions)
@@ -367,12 +370,25 @@ class PaperExecutor:
         if balance:
             new_balance = float(balance.balance_usd) + change
             balance.balance_usd = new_balance
-            balance.total_pnl = new_balance - float(balance.starting_balance_usd)
 
-            if new_balance > float(balance.high_water_mark):
-                balance.high_water_mark = new_balance
-            if new_balance < float(balance.low_water_mark):
-                balance.low_water_mark = new_balance
+            # Calculate total portfolio value (cash + open positions)
+            positions = db.query(Position).filter(
+                Position.is_paper == True,
+                Position.status == PositionStatus.OPEN.value,
+            ).all()
+            position_value = sum(
+                float(p.current_value or p.cost_basis) for p in positions
+            )
+            total_value = new_balance + position_value
+
+            # Total P&L based on portfolio value vs starting balance
+            balance.total_pnl = total_value - float(balance.starting_balance_usd)
+
+            # High/low water marks track total portfolio value, not just cash
+            if total_value > float(balance.high_water_mark):
+                balance.high_water_mark = total_value
+            if total_value < float(balance.low_water_mark):
+                balance.low_water_mark = total_value
 
     def close_position(
         self,

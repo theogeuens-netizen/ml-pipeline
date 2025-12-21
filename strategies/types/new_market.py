@@ -35,8 +35,8 @@ class NewMarketStrategy(Strategy):
             if not m.no_token_id:
                 continue
 
-            # Time check (want early markets)
-            if m.hours_to_close is None or m.hours_to_close < self.min_hours_to_expiry:
+            # Time check (want early markets, must not be expired)
+            if m.hours_to_close is None or m.hours_to_close <= 0 or m.hours_to_close < self.min_hours_to_expiry:
                 continue
 
             # Liquidity

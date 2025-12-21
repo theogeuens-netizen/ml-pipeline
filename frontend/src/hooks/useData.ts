@@ -132,6 +132,23 @@ export function useRedisStats() {
   })
 }
 
+// Lifecycle monitoring hooks
+export function useLifecycleStatus() {
+  return useQuery({
+    queryKey: ['lifecycleStatus'],
+    queryFn: api.getLifecycleStatus,
+    refetchInterval: 30000,
+  })
+}
+
+export function useLifecycleAnomalies(limit = 50) {
+  return useQuery({
+    queryKey: ['lifecycleAnomalies', limit],
+    queryFn: () => api.getLifecycleAnomalies(limit),
+    refetchInterval: 60000,
+  })
+}
+
 // Database browser hooks
 export function useTables() {
   return useQuery({

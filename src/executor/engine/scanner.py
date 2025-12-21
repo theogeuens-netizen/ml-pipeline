@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from src.db.database import get_session
 from src.db.models import Market, Snapshot
 from src.executor.config import ExecutorConfig, get_config
-from src.executor.strategies.base import MarketData
+from strategies.base import MarketData
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +60,24 @@ class MarketScanner:
 
         try:
             filters = self.config.filters
+            now = datetime.now(timezone.utc)
 
-            # Base query for active markets with token IDs
+            # Base query for TRADEABLE markets
+            # A market is tradeable if:
+            # - active=True (we're tracking it)
+            # - resolved=False (not yet resolved)
+            # - closed=False (still open for trading)
+            # - accepting_orders=True (can accept new orders)
+            # - has token IDs (required for trading)
+            # - end_date not in the past (or null)
             query = db.query(Market).filter(
                 Market.active == True,
                 Market.resolved == False,
+                Market.closed == False,  # Critical: don't trade on closed markets
+                Market.accepting_orders == True,  # Critical: market must accept orders
                 Market.yes_token_id.isnot(None),
+            ).filter(
+                (Market.end_date.is_(None)) | (Market.end_date > now)
             )
 
             # Execute query
@@ -75,7 +87,6 @@ class MarketScanner:
 
             # Convert to MarketData and apply filters
             result = []
-            now = datetime.now(timezone.utc)
 
             for market in markets:
                 # Apply keyword filter
@@ -143,6 +154,8 @@ class MarketScanner:
             spread = float(snapshot.spread) if snapshot.spread else None
             volume_24h = float(snapshot.volume_24h) if snapshot.volume_24h else None
             liquidity = float(snapshot.liquidity) if snapshot.liquidity else None
+            bid_depth_10 = float(snapshot.bid_depth_10) if snapshot.bid_depth_10 else None
+            ask_depth_10 = float(snapshot.ask_depth_10) if snapshot.ask_depth_10 else None
         else:
             price = float(market.initial_price) if market.initial_price else 0.5
             best_bid = None
@@ -150,6 +163,8 @@ class MarketScanner:
             spread = float(market.initial_spread) if market.initial_spread else None
             volume_24h = None
             liquidity = float(market.initial_liquidity) if market.initial_liquidity else None
+            bid_depth_10 = None
+            ask_depth_10 = None
 
         return MarketData(
             id=market.id,
@@ -165,13 +180,15 @@ class MarketScanner:
             end_date=market.end_date,
             volume_24h=volume_24h,
             liquidity=liquidity,
+            bid_depth_10=bid_depth_10,
+            ask_depth_10=ask_depth_10,
             category=market.category,
             category_l1=market.category_l1,
             category_l2=market.category_l2,
             category_l3=market.category_l3,
             event_id=market.event_id,
             event_title=market.event_title,
-            raw={
+            snapshot={
                 "tier": market.tier,
                 "snapshot_count": market.snapshot_count,
             },
@@ -199,10 +216,13 @@ class MarketScanner:
             db = get_session().__enter__()
 
         try:
+            # Filter for tradeable markets in this event
             markets = db.query(Market).filter(
                 Market.event_id == event_id,
                 Market.active == True,
                 Market.resolved == False,
+                Market.closed == False,
+                Market.accepting_orders == True,
             ).all()
 
             now = datetime.now(timezone.utc)

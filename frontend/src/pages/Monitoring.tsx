@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMonitoringHealth, useMonitoringErrors, useFieldCompleteness, useWebSocketCoverage, useSubscriptionHealth, useConnectionStatus, useTierTransitions, useTaskActivity, useRedisStats } from '../hooks/useData'
+import { useMonitoringHealth, useMonitoringErrors, useFieldCompleteness, useWebSocketCoverage, useSubscriptionHealth, useConnectionStatus, useTierTransitions, useTaskActivity, useRedisStats, useLifecycleStatus } from '../hooks/useData'
 import { clsx } from 'clsx'
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -23,6 +23,7 @@ export default function Monitoring() {
   const { data: tierTransitions } = useTierTransitions(1)
   const { data: taskActivity } = useTaskActivity(30)
   const { data: redisStats } = useRedisStats()
+  const { data: lifecycleStatus } = useLifecycleStatus()
   const [selectedError, setSelectedError] = useState<number | null>(null)
 
   if (healthLoading || completenessLoading) {
@@ -412,6 +413,78 @@ export default function Monitoring() {
           )}
         </div>
       </div>
+
+      {/* Market Lifecycle Status */}
+      {lifecycleStatus && (
+        <div className="bg-gray-800 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">Market Lifecycle</h2>
+            <div className="flex gap-4 text-sm">
+              <span className="text-gray-400">
+                24h: <span className="text-green-400">{lifecycleStatus.recent_activity_24h.closed} closed</span>,{' '}
+                <span className="text-blue-400">{lifecycleStatus.recent_activity_24h.resolved} resolved</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Trading Status Distribution */}
+            <div>
+              <div className="text-gray-400 text-sm mb-3">Trading Status</div>
+              <div className="space-y-2">
+                {Object.entries(lifecycleStatus.trading_status_distribution)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([status, count]) => (
+                    <div key={status} className="flex items-center gap-3">
+                      <div className={clsx(
+                        'w-3 h-3 rounded-full',
+                        status === 'trading' ? 'bg-green-500' :
+                        status === 'closed' ? 'bg-yellow-500' :
+                        status === 'resolved' ? 'bg-blue-500' :
+                        status === 'suspended' ? 'bg-orange-500' :
+                        'bg-gray-500'
+                      )} />
+                      <span className="text-gray-300 capitalize flex-1">{status}</span>
+                      <span className="text-white font-medium">{count.toLocaleString()}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            {/* UMA Resolution Status Distribution */}
+            <div>
+              <div className="text-gray-400 text-sm mb-3">UMA Status</div>
+              <div className="space-y-2">
+                {Object.entries(lifecycleStatus.uma_status_distribution)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([status, count]) => (
+                    <div key={status} className="flex items-center gap-3">
+                      <div className={clsx(
+                        'w-3 h-3 rounded-full',
+                        status === 'resolved' ? 'bg-blue-500' :
+                        status === 'proposed' ? 'bg-yellow-500' :
+                        status === 'disputed' ? 'bg-red-500' :
+                        status === 'none' ? 'bg-gray-500' :
+                        'bg-purple-500'
+                      )} />
+                      <span className="text-gray-300 capitalize flex-1">{status}</span>
+                      <span className="text-white font-medium">{count.toLocaleString()}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Alerts */}
+          {lifecycleStatus.alerts.markets_stuck_pending_24h > 0 && (
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <div className="flex items-center gap-2 text-yellow-400">
+                <span className="text-sm">⚠️ {lifecycleStatus.alerts.markets_stuck_pending_24h} markets stuck in pending state &gt;24h</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Field Completeness by Category */}
       <div className="bg-gray-800 rounded-lg p-6">

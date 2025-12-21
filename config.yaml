@@ -12,14 +12,14 @@ settings:
 # Risk management limits
 risk:
   max_position_usd: 100
-  max_total_exposure_usd: 1000
-  max_positions: 60
-  max_drawdown_pct: 0.15
+  max_total_exposure_usd: 10000  # 25 strategies × $400 each
+  max_positions: 500             # ~20 positions per strategy
+  max_drawdown_pct: 0.20  # Stop trading if down 20% from peak
 
 # Default order execution settings
 execution:
-  default_order_type: limit        # market | limit | spread
-  limit_offset_bps: 50             # Place 0.5% better than mid
+  default_order_type: market       # market | limit | spread (market = most conservative)
+  limit_offset_bps: 50             # Place 0.5% better than mid (for limit orders)
   spread_timeout_seconds: 30       # For spread mode: wait then cross
 
 # Default position sizing

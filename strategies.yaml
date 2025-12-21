@@ -4,7 +4,7 @@
 
 defaults:
   size_pct: 0.01
-  order_type: spread
+  order_type: market   # market = most conservative (pays ask, guaranteed fill)
   allocated_usd: 400
 
 # =============================================================================

@@ -12,7 +12,7 @@ import math
 from typing import Optional
 
 from src.executor.config import ExecutorConfig, SizingConfig, SizingMethod, get_config
-from src.executor.strategies.base import Signal
+from strategies.base import Signal
 
 logger = logging.getLogger(__name__)
 
@@ -152,8 +152,8 @@ class PositionSizer:
 
         This helps maintain similar risk across different market conditions.
         """
-        # Default volatility (if not available in signal metadata)
-        volatility = signal.metadata.get("volatility", 0.1)
+        # Default volatility (if not available in signal decision_inputs)
+        volatility = getattr(signal, 'decision_inputs', {}).get("volatility", 0.1)
 
         if volatility <= 0:
             volatility = 0.1  # Default 10% volatility

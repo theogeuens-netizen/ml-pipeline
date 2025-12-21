@@ -357,3 +357,118 @@ class PositionManager:
         finally:
             if close_db:
                 db.close()
+
+    def close_positions_on_resolution(
+        self,
+        market_id: int,
+        outcome: str,
+        db: Optional[Session] = None,
+    ) -> list[dict]:
+        """
+        Close all positions on a resolved market and calculate P&L.
+
+        In prediction markets:
+        - If outcome=YES: YES tokens pay $1.00, NO tokens pay $0.00
+        - If outcome=NO: NO tokens pay $1.00, YES tokens pay $0.00
+        - If outcome=UNKNOWN: Return cost basis (no P&L)
+
+        Args:
+            market_id: Market ID that resolved
+            outcome: Resolution outcome ("YES", "NO", or "UNKNOWN")
+            db: Optional database session
+
+        Returns:
+            List of dicts with position_id, strategy_name, side, cost_basis, payout, pnl
+        """
+        close_db = db is None
+        if db is None:
+            db = get_session().__enter__()
+
+        results = []
+        now = datetime.now(timezone.utc)
+
+        try:
+            # Find all open positions on this market
+            positions = db.query(Position).filter(
+                Position.market_id == market_id,
+                Position.status == PositionStatus.OPEN.value,
+            ).all()
+
+            if not positions:
+                return results
+
+            for position in positions:
+                # Determine payout based on outcome and position side
+                # Position side is BUY YES or BUY NO (we only buy, not sell)
+                # We need to know which token was bought
+                # token_id tells us if it was YES or NO token
+
+                # Get market to determine which token this is
+                from src.db.models import Market
+                market = db.query(Market).filter(Market.id == market_id).first()
+
+                if not market:
+                    logger.warning(f"Market {market_id} not found for position {position.id}")
+                    continue
+
+                # Determine if position is on YES or NO side
+                is_yes_position = (position.token_id == market.yes_token_id)
+
+                # Calculate payout per share
+                if outcome == "YES":
+                    payout_per_share = 1.0 if is_yes_position else 0.0
+                elif outcome == "NO":
+                    payout_per_share = 0.0 if is_yes_position else 1.0
+                else:  # UNKNOWN - refund at entry price
+                    payout_per_share = float(position.entry_price)
+
+                # Calculate total payout and P&L
+                shares = float(position.size_shares)
+                cost_basis = float(position.cost_basis)
+                payout = shares * payout_per_share
+                pnl = payout - cost_basis
+
+                # Update position
+                position.exit_price = payout_per_share
+                position.exit_time = now
+                position.realized_pnl = pnl
+                position.status = PositionStatus.CLOSED.value
+                position.close_reason = f"market_resolved_{outcome.lower()}"
+
+                results.append({
+                    "position_id": position.id,
+                    "strategy_name": position.strategy_name,
+                    "side": "YES" if is_yes_position else "NO",
+                    "shares": shares,
+                    "cost_basis": cost_basis,
+                    "payout": payout,
+                    "pnl": pnl,
+                })
+
+                logger.info(
+                    f"Position {position.id} resolved: {position.strategy_name} "
+                    f"{'YES' if is_yes_position else 'NO'} → {outcome}, "
+                    f"P&L: ${pnl:+.2f}"
+                )
+
+            if close_db:
+                db.commit()
+
+            return results
+
+        finally:
+            if close_db:
+                db.close()
+
+    def get_total_position_value(self, db: Optional[Session] = None) -> float:
+        """
+        Get total current value of all open positions.
+
+        Args:
+            db: Optional database session
+
+        Returns:
+            Total position value in USD
+        """
+        positions = self.get_open_positions(db)
+        return sum(float(p.current_value or p.cost_basis) for p in positions)

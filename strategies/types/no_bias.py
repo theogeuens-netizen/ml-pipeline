@@ -40,8 +40,8 @@ class NoBiasStrategy(Strategy):
             if not m.no_token_id:
                 continue
 
-            # Time window
-            if m.hours_to_close is None:
+            # Time window - must be positive and within range
+            if m.hours_to_close is None or m.hours_to_close <= 0:
                 continue
             if m.hours_to_close < self.min_hours or m.hours_to_close > self.max_hours:
                 continue

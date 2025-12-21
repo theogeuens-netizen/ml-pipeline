@@ -15,7 +15,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from src.executor.config import ExecutorConfig, get_config
-from src.executor.strategies.base import Signal
+from strategies.base import Signal
 from .positions import PositionManager
 
 logger = logging.getLogger(__name__)
@@ -70,8 +70,41 @@ class RiskManager:
         Returns:
             RiskCheckResult with approval status and details
         """
+        from src.db.models import Market
+        from src.db.database import get_session as get_db_session
+
         # Get risk config
         risk = self.config.risk
+
+        # Check 0: Market is still tradeable (could have closed between scan and execution)
+        # This prevents race conditions where market closes after scan but before execution
+        check_db = db
+        should_close = False
+        if check_db is None:
+            check_db = get_db_session().__enter__()
+            should_close = True
+
+        try:
+            market = check_db.query(Market).filter(Market.id == signal.market_id).first()
+            if market:
+                if market.resolved:
+                    return RiskCheckResult(
+                        approved=False,
+                        reason=f"Market {signal.market_id} is resolved",
+                    )
+                if market.closed:
+                    return RiskCheckResult(
+                        approved=False,
+                        reason=f"Market {signal.market_id} is closed",
+                    )
+                if not market.accepting_orders:
+                    return RiskCheckResult(
+                        approved=False,
+                        reason=f"Market {signal.market_id} not accepting orders",
+                    )
+        finally:
+            if should_close:
+                check_db.close()
 
         # Check 1: Position count limit
         position_count = self.position_manager.get_position_count(db)
@@ -118,11 +151,13 @@ class RiskManager:
         max_position = risk.max_position_usd
         available_capital = min(balance, available_for_new, max_position)
 
-        if signal.suggested_size_usd and signal.suggested_size_usd > available_capital:
+        # Support both old and new Signal attribute names
+        signal_size = getattr(signal, 'size_usd', None) or getattr(signal, 'suggested_size_usd', None)
+        if signal_size and signal_size > available_capital:
             # Reduce suggested size to available
             suggested_size = available_capital
         else:
-            suggested_size = signal.suggested_size_usd
+            suggested_size = signal_size
 
         return RiskCheckResult(
             approved=True,
@@ -133,6 +168,11 @@ class RiskManager:
     def _check_drawdown(self) -> bool:
         """
         Check if current drawdown is within limits.
+
+        Drawdown is calculated as:
+            (high_water_mark - total_portfolio_value) / high_water_mark
+
+        Where total_portfolio_value = cash + current_value_of_open_positions
 
         Returns:
             True if within limits, False if exceeded
@@ -146,21 +186,35 @@ class RiskManager:
                 if balance is None:
                     return True
 
-                current = float(balance.balance_usd)
+                # Get cash balance
+                cash = float(balance.balance_usd)
+
+                # Get current value of open positions
+                position_value = self.position_manager.get_total_position_value(db)
+
+                # Total portfolio value = cash + positions
+                total_value = cash + position_value
+
                 high_water = float(balance.high_water_mark)
 
                 if high_water <= 0:
                     return True
 
-                drawdown = (high_water - current) / high_water
+                # Drawdown from total portfolio value, not just cash
+                drawdown = (high_water - total_value) / high_water
                 max_drawdown = self.config.risk.max_drawdown_pct
 
                 if drawdown >= max_drawdown:
                     logger.warning(
-                        f"Drawdown limit exceeded: {drawdown:.1%} >= {max_drawdown:.1%}"
+                        f"Drawdown limit exceeded: {drawdown:.1%} >= {max_drawdown:.1%} "
+                        f"(cash=${cash:.2f}, positions=${position_value:.2f}, total=${total_value:.2f})"
                     )
                     return False
 
+                logger.debug(
+                    f"Drawdown check OK: {drawdown:.1%} < {max_drawdown:.1%} "
+                    f"(cash=${cash:.2f}, positions=${position_value:.2f})"
+                )
                 return True
         else:
             # For live trading, would need to check actual balance vs high water

@@ -76,7 +76,9 @@ def get_alerter() -> TelegramAlert:
 def alert_trade(
     strategy: str,
     side: str,
-    market: str,
+    market_title: str,
+    market_id: int,
+    token_side: str,
     price: float,
     size: float,
     edge: Optional[float] = None,
@@ -85,20 +87,40 @@ def alert_trade(
     Send a trade alert.
 
     Args:
-        strategy: Strategy name
+        strategy: Strategy/algorithm name
         side: BUY or SELL
-        market: Market question/description
-        price: Execution price
+        market_title: Market question/description
+        market_id: Database market ID
+        token_side: Which token was bought (YES or NO)
+        price: Execution price (probability)
         size: Trade size in USD
         edge: Optional edge estimate
     """
-    emoji = "🟢" if side == "BUY" else "🔴"
-    edge_str = f" (edge: {edge:.1%})" if edge else ""
+    emoji = "🟢" if token_side == "YES" else "🔴"
+
+    # Calculate YES/NO odds from price
+    # If buying YES token, price is YES probability
+    # If buying NO token, price is NO probability, so YES = 1 - price
+    if token_side == "YES":
+        yes_odds = price
+        no_odds = 1 - price
+    else:
+        no_odds = price
+        yes_odds = 1 - price
+
+    edge_str = f"\nEdge: {edge:.1%}" if edge else ""
 
     message = (
-        f"{emoji} <b>{strategy}</b>\n"
-        f"{side} ${size:.0f} @ {price:.1%}{edge_str}\n"
-        f"<i>{market[:60]}</i>"
+        f"{emoji} <b>NEW TRADE</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"<b>Market:</b> {market_title[:80]}\n"
+        f"<b>ID:</b> {market_id}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"<b>Odds:</b> YES {yes_odds:.0%} / NO {no_odds:.0%}\n"
+        f"<b>Bet:</b> {token_side} @ {price:.1%}\n"
+        f"<b>Amount:</b> ${size:.2f}\n"
+        f"<b>Algorithm:</b> {strategy}"
+        f"{edge_str}"
     )
 
     return get_alerter().send(message)
@@ -153,27 +175,47 @@ def alert_daily_summary(
 def alert_position_closed(
     strategy: str,
     market: str,
+    side: str,
+    outcome: str,
+    cost_basis: float,
+    payout: float,
     pnl: float,
-    hold_time_hours: float,
+    market_id: Optional[int] = None,
 ) -> bool:
     """
-    Send alert when a position is closed.
+    Send alert when a position is closed on market resolution.
 
     Args:
-        strategy: Strategy name
-        market: Market question/description
-        pnl: Realized P&L
-        hold_time_hours: How long position was held
+        strategy: Strategy/algorithm name
+        market: Market question/slug
+        side: Position side (YES or NO)
+        outcome: Market outcome (YES or NO)
+        cost_basis: Original cost of position
+        payout: Final payout received
+        pnl: Realized P&L (payout - cost_basis)
+        market_id: Optional market ID
     """
-    emoji = "💰" if pnl >= 0 else "💸"
-    pnl_color = "+" if pnl >= 0 else ""
+    # Determine if we won or lost
+    won = pnl > 0
+    emoji = "💰" if won else "💸"
+    result_emoji = "✅" if won else "❌"
+
+    pnl_sign = "+" if pnl >= 0 else ""
+    pnl_pct = (pnl / cost_basis * 100) if cost_basis > 0 else 0
+
+    market_id_str = f"\n<b>ID:</b> {market_id}" if market_id else ""
 
     message = (
-        f"{emoji} <b>Position Closed</b>\n"
-        f"Strategy: {strategy}\n"
-        f"P&L: {pnl_color}${pnl:.2f}\n"
-        f"Hold Time: {hold_time_hours:.1f}h\n"
-        f"<i>{market[:60]}</i>"
+        f"{emoji} <b>POSITION CLOSED</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"<b>Market:</b> {market[:80]}{market_id_str}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"<b>Bet:</b> {side}\n"
+        f"<b>Outcome:</b> {outcome} {result_emoji}\n"
+        f"<b>Cost:</b> ${cost_basis:.2f}\n"
+        f"<b>Payout:</b> ${payout:.2f}\n"
+        f"<b>P&L:</b> {pnl_sign}${pnl:.2f} ({pnl_sign}{pnl_pct:.0f}%)\n"
+        f"<b>Algorithm:</b> {strategy}"
     )
 
     return get_alerter().send(message)

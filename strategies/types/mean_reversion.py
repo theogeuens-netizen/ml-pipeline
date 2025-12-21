@@ -35,6 +35,10 @@ class MeanReversionStrategy(Strategy):
 
     def scan(self, markets: list[MarketData]) -> Iterator[Signal]:
         for m in markets:
+            # Skip expired markets
+            if m.hours_to_close is not None and m.hours_to_close <= 0:
+                continue
+
             # Category filter
             if self.category and m.category_l1 != self.category:
                 continue
