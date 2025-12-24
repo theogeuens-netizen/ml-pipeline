@@ -130,9 +130,20 @@ docker-compose ps
 | `src/tasks/alerts.py` | Daily summary Celery task |
 | `.claude/commands/trading.md` | Trading CLI slash command |
 | `.claude/commands/categorize.md` | Categorization slash command |
+| `.claude/commands/hypothesis.md` | Strategy hypothesis generation |
+| `.claude/commands/test.md` | Backtest with robustness checks |
+| `.claude/commands/verdict.md` | Experiment verdict and ledger update |
 | `TRADING_CLI.md` | Trading CLI full reference |
+| `RESEARCH_LAB.md` | Strategy Research Lab reference |
+| `USER_GUIDE.md` | User-friendly guide: research → deployment |
 | `src/services/rule_categorizer.py` | Rule-based market categorization |
+| `src/backtest/robustness.py` | Time/liquidity/category split testing |
 | `cli/categorize_helpers.py` | Categorization CLI helpers |
+| `cli/ledger.py` | Ledger query tool |
+| `cli/robustness.py` | Robustness check CLI |
+| `cli/ship.py` | Deploy experiments to strategies.yaml |
+| `experiments/` | Strategy experiment files |
+| `ledger/insights.jsonl` | Accumulated research learnings |
 
 ---
 
@@ -685,6 +696,63 @@ CRYPTO, SPORTS, ESPORTS, POLITICS, ECONOMICS, BUSINESS, ENTERTAINMENT, WEATHER, 
 - `.claude/commands/categorize.md` - Full command reference
 - `src/services/rule_categorizer.py` - Rule engine
 - `cli/categorize_helpers.py` - CLI helper functions
+
+---
+
+### Strategy Research Lab
+
+Systematic strategy research through friction analysis and rigorous backtesting.
+
+**Slash Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `/hypothesis <bucket>` | Generate testable hypothesis for friction bucket |
+| `/test <exp_id>` | Run backtest with robustness checks |
+| `/verdict <exp_id>` | Evaluate results, update ledger |
+
+**Friction Buckets:**
+- `timing` - Information arrives gradually; markets update slowly
+- `liquidity` - Thin markets, volume clustering, overreactions
+- `behavioral` - Anchoring, favorite/underdog bias, narrative preference
+- `mechanism` - Resolution rules traders misunderstand
+- `cross-market` - Same outcome priced in multiple markets
+
+**Experiment Workflow:**
+```
+/hypothesis timing     → Creates experiments/exp-001/spec.md
+/test exp-001          → Creates config.yaml, results.json
+/verdict exp-001       → Creates verdict.md, updates ledger
+```
+
+**Kill Criteria (strategy is dead if ANY fail):**
+- Sharpe < 0.5
+- Win rate < 51%
+- Sample size < 50 trades
+- Profit factor < 1.1
+- Time-split inconsistent
+
+**CLI Tools:**
+```bash
+python3 -m cli.ledger stats              # Ledger statistics
+python3 -m cli.ledger search timing      # Search by friction bucket
+python3 -m cli.robustness exp-001 --all  # Run robustness checks
+python3 -m cli.ship exp-001              # Preview deployment
+python3 -m cli.ship exp-001 --apply      # Deploy to strategies.yaml
+```
+
+**Trading Integration:**
+From `/trading` mode, use:
+- `research` - View ledger stats and recent experiments
+- `ship <exp_id>` - Deploy shipped experiment to strategies.yaml
+
+**Key files:**
+- `RESEARCH_LAB.md` - Full reference documentation
+- `experiments/` - Experiment specs and results
+- `ledger/insights.jsonl` - Accumulated learnings
+- `.claude/commands/hypothesis.md`, `test.md`, `verdict.md`
+- `cli/ledger.py`, `cli/robustness.py`, `cli/ship.py`
+- `src/backtest/robustness.py`
 
 ---
 

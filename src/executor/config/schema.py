@@ -32,8 +32,9 @@ class SizingMethod(str, Enum):
 class RiskConfig(BaseModel):
     """Risk management configuration."""
     max_position_usd: float = Field(default=100.0, ge=1.0, description="Max USD per position")
-    max_total_exposure_usd: float = Field(default=1000.0, ge=1.0, description="Max total USD exposure")
-    max_positions: int = Field(default=20, ge=1, description="Max number of open positions")
+    max_total_exposure_usd: float = Field(default=0.0, ge=0.0, description="Max total USD exposure (0 = disabled)")
+    max_positions: int = Field(default=20, ge=0, description="Max number of open positions (global). 0 = disabled")
+    max_positions_per_strategy: int = Field(default=20, ge=1, description="Max open positions per strategy")
     max_drawdown_pct: float = Field(default=0.15, ge=0.01, le=1.0, description="Max drawdown before stopping")
 
 

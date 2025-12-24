@@ -250,6 +250,18 @@ class RedisClient:
         """Get count of connected markets."""
         return await self.client.scard("ws:connected")
 
+    async def clear_ws_connected(self) -> int:
+        """
+        Clear all entries from ws:connected set.
+
+        Call this when WebSocket collectors start to remove stale entries
+        from previous sessions. Returns the number of entries removed.
+        """
+        count = await self.client.scard("ws:connected")
+        await self.client.delete("ws:connected")
+        logger.info("Cleared ws:connected set", removed_count=count)
+        return count
+
     async def set_ws_last_activity(self) -> None:
         """Update global WebSocket activity timestamp (for health checks)."""
         await self.client.set(

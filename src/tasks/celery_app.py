@@ -83,17 +83,46 @@ app.conf.beat_schedule = {
         "task": "src.tasks.discovery.discover_markets",
         "schedule": crontab(minute=0),  # Every hour at :00
     },
-    # NOTE: Rule-based categorization disabled - use /categorize command manually
-    # The rules need improvement before running automatically
+    # === CATEGORIZATION TASKS ===
+    # Rule-based categorization (fast, free) - every hour at :05
+    "categorize-with-rules": {
+        "task": "src.tasks.categorization.categorize_with_rules",
+        "schedule": crontab(minute=5),
+        "kwargs": {"limit": 1000},
+    },
+    # NOTE: Claude-based tasks disabled in Celery - they require the Claude CLI
+    # which is only available on the host machine. Use scripts/cron_categorize.sh
+    # or run manually: python3 scripts/categorize_with_claude.py --batch 30
+    #
+    # "categorize-with-claude": {
+    #     "task": "src.tasks.categorization.categorize_with_claude",
+    #     "schedule": crontab(minute=15),
+    #     "kwargs": {"batch_size": 15},
+    # },
+    # "validate-rule-accuracy": {
+    #     "task": "src.tasks.categorization.validate_rule_accuracy",
+    #     "schedule": crontab(hour="*/6", minute=30),
+    #     "kwargs": {"sample_per_rule": 10},
+    # },
+    # "suggest-rule-improvements": {
+    #     "task": "src.tasks.categorization.suggest_rule_improvements",
+    #     "schedule": crontab(day_of_week=0, hour=4, minute=0),
+    #     "kwargs": {"min_occurrences": 10},
+    # },
     # Reassign tiers every 5 minutes
     "update-tiers": {
         "task": "src.tasks.discovery.update_market_tiers",
         "schedule": crontab(minute="*/5"),
     },
-    # Check for resolved markets every 15 minutes
+    # Check for resolved markets every 15 minutes (closes positions)
     "check-resolutions": {
         "task": "src.tasks.discovery.check_resolutions",
         "schedule": crontab(minute="*/15"),
+    },
+    # Capture resolutions for ALL markets (for ML training data)
+    "capture-all-resolutions": {
+        "task": "src.tasks.discovery.capture_all_resolutions",
+        "schedule": crontab(minute="*/10"),  # Every 10 minutes
     },
     # Cleanup stale T4 markets (expired or no trades in 1 hour)
     "cleanup-stale-markets": {

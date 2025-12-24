@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from celery import shared_task
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, or_
 import structlog
 
 from src.config.settings import settings
@@ -63,6 +63,39 @@ def calculate_tier(end_date: Optional[datetime]) -> int:
         return 1
     else:
         return 0
+
+
+def derive_outcome(outcome_prices_str: Optional[str]) -> Optional[str]:
+    """
+    Derive YES/NO/INVALID from outcomePrices string.
+
+    Resolution prices are:
+    - YES won: ["1", "0"]
+    - NO won: ["0", "1"]
+    - INVALID: ["0", "0"] or similar edge cases
+
+    Args:
+        outcome_prices_str: JSON string like '["1", "0"]'
+
+    Returns:
+        "YES", "NO", "INVALID", or None if not determinable
+    """
+    if not outcome_prices_str:
+        return None
+    try:
+        import json
+        prices = json.loads(outcome_prices_str)
+        yes_price = float(prices[0])
+        no_price = float(prices[1]) if len(prices) > 1 else 0
+        if yes_price > 0.99:
+            return "YES"
+        elif no_price > 0.99:
+            return "NO"
+        elif yes_price < 0.01 and no_price < 0.01:
+            return "INVALID"
+    except (json.JSONDecodeError, IndexError, TypeError, ValueError):
+        pass
+    return None
 
 
 @shared_task(name="src.tasks.discovery.discover_markets")
@@ -217,12 +250,16 @@ async def _discover_markets_async() -> dict:
                         existing.event_slug = event_slug
                     if event_title and not existing.event_title:
                         existing.event_title = event_title
+                    # Update gamma_id if missing (for existing markets before this field was added)
+                    if existing.gamma_id is None and market_data.get("id"):
+                        existing.gamma_id = int(market_data.get("id"))
                     rows_updated += 1
                 else:
                     # Insert new market
                     now = datetime.now(timezone.utc)
                     new_market = Market(
                         condition_id=condition_id,
+                        gamma_id=int(market_data.get("id")) if market_data.get("id") else None,
                         slug=market_data.get("slug", ""),
                         question=market_data.get("question", ""),
                         description=market_data.get("description"),
@@ -405,276 +442,361 @@ def update_market_tiers() -> dict:
         redis_client.close()
 
 
+@shared_task(name="src.tasks.discovery.capture_all_resolutions")
+def capture_all_resolutions() -> dict:
+    """
+    Capture resolution outcomes for ALL markets past their end_date.
+
+    This is for ML training data - we need outcomes for all markets,
+    not just those with positions.
+
+    Runs every 10 minutes, processes markets in batches.
+
+    Returns:
+        Dictionary with checked and resolved counts
+    """
+    from datetime import timedelta
+    from src.fetchers.gamma import SyncGammaClient
+
+    now = datetime.now(timezone.utc)
+    client = SyncGammaClient()
+    resolved_count = 0
+    checked_count = 0
+
+    # Only check markets that ended recently (last 14 days)
+    # Older markets are likely removed from API anyway
+    cutoff = now - timedelta(days=14)
+
+    try:
+        with get_session() as session:
+            # Find markets past end_date but within recent window
+            markets = session.execute(
+                select(Market).where(
+                    Market.resolved == False,
+                    Market.outcome == None,
+                    Market.end_date < now,
+                    Market.end_date > cutoff,  # Only recent markets
+                    Market.gamma_id != None,  # Need gamma_id for lookup
+                ).order_by(Market.end_date.desc())  # Check most recent first
+                .limit(100)  # Process in batches to avoid rate limiting
+            ).scalars().all()
+
+            if not markets:
+                return {"checked": 0, "resolved": 0}
+
+            for market in markets:
+                checked_count += 1
+
+                # Fetch from Gamma API using reliable gamma_id
+                market_data = client.get_market_by_id(market.gamma_id)
+
+                if market_data is None:
+                    # Market removed from API, mark as UNKNOWN
+                    market.outcome = "UNKNOWN"
+                    market.resolved = True
+                    market.resolved_at = now
+                    market.active = False
+                    resolved_count += 1
+                    logger.info(
+                        "Market removed from API",
+                        market=market.slug,
+                        gamma_id=market.gamma_id,
+                    )
+                    continue
+
+                # Check if resolved
+                uma_status = market_data.get("umaResolutionStatus")
+                if uma_status == "resolved":
+                    # Parse outcome from prices
+                    outcome = derive_outcome(market_data.get("outcomePrices"))
+                    if outcome:
+                        market.outcome = outcome
+                        market.resolved = True
+                        market.resolved_at = now
+                        market.active = False
+                        resolved_count += 1
+                        logger.info(
+                            "Captured resolution",
+                            market=market.slug,
+                            outcome=outcome,
+                            gamma_id=market.gamma_id,
+                        )
+                    else:
+                        # UMA resolved but prices indeterminate (0.5/0.5)
+                        market.outcome = "UNKNOWN"
+                        market.resolved = True
+                        market.resolved_at = now
+                        market.active = False
+                        resolved_count += 1
+                        logger.info(
+                            "Captured resolution (indeterminate prices)",
+                            market=market.slug,
+                            outcome="UNKNOWN",
+                            gamma_id=market.gamma_id,
+                        )
+
+                # Update lifecycle fields regardless
+                market.closed = market_data.get("closed", False)
+                market.accepting_orders = market_data.get("acceptingOrders", True)
+                if uma_status != market.uma_resolution_status:
+                    market.uma_resolution_status = uma_status
+                    market.uma_status_updated_at = now
+
+            session.commit()
+
+        logger.info(
+            "capture_all_resolutions complete",
+            checked=checked_count,
+            resolved=resolved_count,
+        )
+        return {"checked": checked_count, "resolved": resolved_count}
+
+    finally:
+        client.close()
+
+
 @shared_task(name="src.tasks.discovery.check_resolutions")
 def check_resolutions() -> dict:
     """
-    Check for resolved markets, update status, close positions, and update balance.
+    Close positions on resolved markets and update balances.
 
-    This task:
-    1. Queries Gamma API for markets that may have resolved
-    2. Determines outcome (YES/NO/UNKNOWN)
-    3. Closes any open positions on resolved markets
-    4. Calculates P&L and updates paper_balances
-    5. Sends Telegram alerts for position closures
+    This task now primarily reads pre-captured outcomes from the database
+    (populated by capture_all_resolutions), with API fallback for edge cases.
 
     Returns:
         Dictionary with resolved count and P&L
     """
-    from src.fetchers.gamma import SyncGammaClient, GammaClient
+    from src.fetchers.gamma import SyncGammaClient
     from src.executor.portfolio.positions import PositionManager
-    from src.executor.models import PaperBalance
+    from src.executor.models import PaperBalance, StrategyBalance, Position
     from src.alerts.telegram import alert_position_closed
+    from decimal import Decimal
 
-    with get_session() as session:
-        # Get active markets that have passed their end date
-        now = datetime.now(timezone.utc)
-        markets = session.execute(
-            select(Market).where(
-                Market.active == True,
-                Market.resolved == False,
-                Market.end_date < now,
-            )
-        ).scalars().all()
-
-        if not markets:
-            return {"checked": 0, "resolved": 0, "positions_closed": 0, "total_pnl": 0}
-
-        market_data_list = [(m.id, m.condition_id, m.slug) for m in markets]
-
-    # Fetch closed markets from Gamma API first - this gives us resolution prices
-    # before markets are removed from the API
-    client = SyncGammaClient()
+    now = datetime.now(timezone.utc)
     position_manager = PositionManager(is_paper=True)
     resolved_count = 0
     positions_closed = 0
     total_pnl = 0.0
 
-    # Fetch closed markets to get resolution data
-    closed_markets = client.get_closed_markets(limit=500)
-    closed_by_condition = {m.get("conditionId"): m for m in closed_markets}
-    logger.info("Fetched closed markets from API", count=len(closed_markets))
+    with get_session() as session:
+        # Get market IDs with open positions
+        markets_with_positions = session.execute(
+            select(Position.market_id).where(Position.status == "open")
+        ).scalars().all()
+        markets_with_positions_set = set(markets_with_positions)
 
-    try:
-        for market_id, condition_id, slug in market_data_list:
-            # First check if we have this market in the closed markets response
-            market_data = closed_by_condition.get(condition_id)
+        if not markets_with_positions_set:
+            return {"checked": 0, "resolved": 0, "positions_closed": 0, "total_pnl": 0}
 
-            # Fall back to single-market fetch if not in closed list
-            if market_data is None:
-                market_data = client.get_market(condition_id)
+        # PHASE 1: Markets with pre-captured outcomes (no API calls needed)
+        markets_with_outcomes = session.execute(
+            select(Market).where(
+                Market.id.in_(markets_with_positions_set),
+                Market.outcome.in_(["YES", "NO", "INVALID"]),  # Outcome already captured
+            )
+        ).scalars().all()
 
-            # Determine outcome based on API response
-            should_resolve = False
-            outcome = "UNKNOWN"
+        for market in markets_with_outcomes:
+            outcome = market.outcome
+            result = _close_positions_for_market(
+                session, market, outcome, position_manager
+            )
+            resolved_count += 1
+            positions_closed += result["positions_closed"]
+            total_pnl += result["total_pnl"]
 
-            if market_data is None:
-                # Market removed from API = resolved but can't determine outcome
-                should_resolve = True
-                outcome = "UNKNOWN"
-                logger.info("Market removed from API", market=slug, condition_id=condition_id[:16] if condition_id else "N/A")
-            else:
-                # First, update lifecycle fields in the database
-                # This captures closed/accepting_orders/uma_resolution_status even if not resolved
-                with get_session() as update_session:
-                    db_market = update_session.get(Market, market_id)
-                    if db_market:
-                        now = datetime.now(timezone.utc)
-                        new_closed = market_data.get("closed", False)
-                        new_accepting = market_data.get("acceptingOrders", True)
-                        new_uma_status = market_data.get("umaResolutionStatus")
+        session.commit()
 
-                        # Capture old state for transition logging
-                        old_trading = get_trading_status(
-                            db_market.active, db_market.closed,
-                            db_market.accepting_orders, db_market.resolved
-                        )
-                        old_uma = get_uma_status(db_market.uma_resolution_status)
+    # PHASE 2: Markets needing API lookup (fallback for positions without outcome)
+    with get_session() as session:
+        # Get markets with open positions that don't have outcome yet
+        markets_needing_lookup = session.execute(
+            select(Market).where(
+                Market.id.in_(markets_with_positions_set),
+                Market.outcome == None,
+                Market.end_date < now,
+            )
+        ).scalars().all()
 
-                        # Track when closed changes
-                        if new_closed and not db_market.closed:
-                            db_market.closed_at = GammaClient.parse_datetime(market_data.get("closedTime")) or now
-                            logger.info("Market closed", market=slug, closed_at=db_market.closed_at)
-                        db_market.closed = new_closed
+        if markets_needing_lookup:
+            client = SyncGammaClient()
+            try:
+                for market in markets_needing_lookup:
+                    # Use gamma_id for direct lookup (most reliable)
+                    market_data = None
+                    if market.gamma_id:
+                        market_data = client.get_market_by_id(market.gamma_id)
 
-                        # Track accepting_orders changes
-                        if new_accepting != db_market.accepting_orders:
-                            db_market.accepting_orders_updated_at = now
-                            logger.info("Market accepting_orders changed", market=slug, accepting_orders=new_accepting)
-                        db_market.accepting_orders = new_accepting
+                    # Fallback to slug
+                    if market_data is None and market.slug:
+                        market_data = client.get_market_by_slug(market.slug)
 
-                        # Track UMA status changes
-                        if new_uma_status != db_market.uma_resolution_status:
-                            db_market.uma_status_updated_at = now
-                            logger.info("Market UMA status changed", market=slug,
-                                       old_status=db_market.uma_resolution_status, new_status=new_uma_status)
-                        db_market.uma_resolution_status = new_uma_status
-
-                        # Log state transition if any lifecycle field changed
-                        new_trading = get_trading_status(
-                            db_market.active, db_market.closed,
-                            db_market.accepting_orders, db_market.resolved
-                        )
-                        new_uma = get_uma_status(db_market.uma_resolution_status)
-
-                        if old_trading != new_trading or old_uma != new_uma:
-                            log_state_transition(
-                                market_id=db_market.id,
-                                condition_id=db_market.condition_id,
-                                slug=db_market.slug,
-                                old_trading=old_trading,
-                                new_trading=new_trading,
-                                old_uma=old_uma,
-                                new_uma=new_uma,
-                            )
-
-                        update_session.commit()
-
-                # Now determine if this market should be marked as resolved
-                uma_status = market_data.get("umaResolutionStatus")
-                is_resolved_flag = market_data.get("resolved", False)
-                is_closed_flag = market_data.get("closed", False)
-                yes_price, no_price = GammaClient.parse_outcome_prices(market_data)
-
-                # Check UMA resolution status first (most reliable)
-                if uma_status == "resolved" or is_resolved_flag:
-                    # Market is definitively resolved - use prices to determine outcome
-                    if yes_price > 0.99:
-                        outcome = "YES"
-                        should_resolve = True
-                    elif no_price > 0.99:  # Equivalent to yes_price < 0.01
-                        outcome = "NO"
-                        should_resolve = True
-                    elif yes_price < 0.01 and no_price < 0.01:
-                        # Both prices near 0 = voided/invalid market
-                        outcome = "INVALID"
-                        should_resolve = True
-                    else:
-                        # UMA says resolved but prices aren't settled yet
-                        # This shouldn't happen, log warning but wait
-                        outcome = "PENDING"
-                        should_resolve = False
-                        logger.warning("UMA resolved but prices not settled",
-                                      market=slug, yes_price=yes_price, no_price=no_price)
-                elif uma_status == "proposed":
-                    # In 2-hour challenge window - DON'T resolve yet
-                    outcome = "PENDING"
-                    should_resolve = False
-                    logger.debug("Market in UMA challenge window", market=slug, uma_status=uma_status)
-                elif uma_status == "disputed":
-                    # Market is disputed - DON'T resolve, wait for DVM vote
-                    outcome = "PENDING"
-                    should_resolve = False
-                    logger.info("Market disputed, waiting for DVM vote", market=slug)
-                elif is_closed_flag and not uma_status:
-                    # Closed but no UMA status yet - use price fallback
-                    if yes_price > 0.99:
-                        outcome = "YES"
-                        should_resolve = True
-                    elif no_price > 0.99:
-                        outcome = "NO"
-                        should_resolve = True
-                    elif yes_price < 0.01 and no_price < 0.01:
-                        outcome = "INVALID"
-                        should_resolve = True
-                    else:
-                        # Closed but prices not settled - waiting for resolution
-                        outcome = "PENDING"
-                        should_resolve = False
-                else:
-                    # Not closed, not resolved
-                    outcome = "PENDING"
-                    should_resolve = False
-
-                logger.debug(
-                    "Resolution check",
-                    market=slug,
-                    resolved=is_resolved_flag,
-                    closed=is_closed_flag,
-                    uma_status=uma_status,
-                    yes_price=yes_price,
-                    no_price=no_price,
-                    outcome=outcome,
-                )
-
-            # Process if we have a definitive outcome (YES, NO, or INVALID)
-            # Skip PENDING (still settling) and UNKNOWN (can't determine)
-            if should_resolve and outcome in ("YES", "NO", "INVALID"):
-                with get_session() as session:
-                    db_market = session.get(Market, market_id)
-                    if db_market:
-                        db_market.resolved = True
-                        db_market.active = False
-                        db_market.resolved_at = datetime.now(timezone.utc)
-                        db_market.outcome = outcome
-
-                        # Close positions and calculate P&L
-                        results = position_manager.close_positions_on_resolution(
-                            market_id=market_id,
-                            outcome=outcome,
-                            db=session,
-                        )
-
-                        # Update paper balance with payouts
-                        if results:
-                            paper_balance = session.query(PaperBalance).first()
-                            if paper_balance:
-                                for result in results:
-                                    # Add payout to balance
-                                    paper_balance.balance_usd += result["payout"]
-                                    total_pnl += result["pnl"]
-                                    positions_closed += 1
-
-                                    # Send Telegram alert
-                                    try:
-                                        alert_position_closed(
-                                            strategy=result["strategy_name"],
-                                            market=slug,
-                                            side=result["side"],
-                                            outcome=outcome,
-                                            cost_basis=result["cost_basis"],
-                                            payout=result["payout"],
-                                            pnl=result["pnl"],
-                                            market_id=market_id,
-                                        )
-                                    except Exception as e:
-                                        logger.warning(f"Failed to send Telegram alert: {e}")
-
-                                # After processing all results, update total_pnl and high/low water marks
-                                # At this point positions are closed, so total value = cash only
-                                new_balance = float(paper_balance.balance_usd)
-                                paper_balance.total_pnl = new_balance - float(paper_balance.starting_balance_usd)
-
-                                # Update high/low water marks (after position close, total = cash)
-                                if new_balance > float(paper_balance.high_water_mark):
-                                    paper_balance.high_water_mark = new_balance
-                                if new_balance < float(paper_balance.low_water_mark):
-                                    paper_balance.low_water_mark = new_balance
-
-                        session.commit()
-                        resolved_count += 1
+                    if market_data is None:
+                        # Market removed from API
+                        market.outcome = "UNKNOWN"
+                        market.resolved = True
+                        market.resolved_at = now
+                        market.active = False
                         logger.info(
-                            "Market resolved",
-                            market=slug,
-                            outcome=outcome,
-                            positions_closed=len(results) if results else 0,
+                            "Market removed from API (fallback)",
+                            market=market.slug,
+                            gamma_id=market.gamma_id,
                         )
+                        continue
 
-    finally:
-        client.close()
+                    # Check if resolved
+                    uma_status = market_data.get("umaResolutionStatus")
+                    if uma_status == "resolved":
+                        outcome = derive_outcome(market_data.get("outcomePrices"))
+                        if outcome:
+                            market.outcome = outcome
+                            market.resolved = True
+                            market.resolved_at = now
+                            market.active = False
+
+                            # Refresh market in session for position closure
+                            session.flush()
+
+                            result = _close_positions_for_market(
+                                session, market, outcome, position_manager
+                            )
+                            resolved_count += 1
+                            positions_closed += result["positions_closed"]
+                            total_pnl += result["total_pnl"]
+
+                    # Update lifecycle fields
+                    market.closed = market_data.get("closed", False)
+                    market.accepting_orders = market_data.get("acceptingOrders", True)
+                    if uma_status != market.uma_resolution_status:
+                        market.uma_resolution_status = uma_status
+                        market.uma_status_updated_at = now
+
+                session.commit()
+            finally:
+                client.close()
 
     logger.info(
-        "Resolution check complete",
-        checked=len(market_data_list),
+        "check_resolutions complete",
         resolved=resolved_count,
         positions_closed=positions_closed,
         total_pnl=total_pnl,
     )
     return {
-        "checked": len(market_data_list),
+        "checked": len(markets_with_positions_set),
         "resolved": resolved_count,
         "positions_closed": positions_closed,
         "total_pnl": total_pnl,
     }
+
+
+def _close_positions_for_market(session, market, outcome, position_manager) -> dict:
+    """
+    Helper to close positions and update balances for a resolved market.
+
+    Returns:
+        Dictionary with positions_closed count and total_pnl
+    """
+    from src.executor.models import PaperBalance, StrategyBalance
+    from src.alerts.telegram import alert_position_closed
+    from decimal import Decimal
+
+    positions_closed = 0
+    total_pnl = 0.0
+
+    # Mark market as resolved
+    market.resolved = True
+    market.active = False
+    market.resolved_at = datetime.now(timezone.utc)
+
+    # Close positions and calculate P&L
+    results = position_manager.close_positions_on_resolution(
+        market_id=market.id,
+        outcome=outcome,
+        db=session,
+    )
+
+    # Update balances with payouts
+    if results:
+        paper_balance = session.query(PaperBalance).first()
+        if paper_balance:
+            for result in results:
+                # Add payout to balance
+                paper_balance.balance_usd += Decimal(str(result["payout"]))
+                total_pnl += result["pnl"]
+                positions_closed += 1
+
+                # Update strategy-specific balance
+                strategy_name = result["strategy_name"]
+                strategy_balance = session.query(StrategyBalance).filter(
+                    StrategyBalance.strategy_name == strategy_name
+                ).first()
+
+                if strategy_balance:
+                    strategy_balance.current_usd = float(strategy_balance.current_usd) + result["payout"]
+                    strategy_balance.realized_pnl = float(strategy_balance.realized_pnl) + result["pnl"]
+                    strategy_balance.position_count = max(0, strategy_balance.position_count - 1)
+                    strategy_balance.trade_count += 1
+
+                    if result["pnl"] > 0:
+                        strategy_balance.win_count += 1
+                    elif result["pnl"] < 0:
+                        strategy_balance.loss_count += 1
+
+                    strategy_balance.total_pnl = float(strategy_balance.realized_pnl) + float(strategy_balance.unrealized_pnl)
+
+                    # Update water marks
+                    current_value = float(strategy_balance.current_usd)
+                    if current_value > float(strategy_balance.high_water_mark):
+                        strategy_balance.high_water_mark = current_value
+                    if current_value < float(strategy_balance.low_water_mark):
+                        strategy_balance.low_water_mark = current_value
+
+                    # Update max drawdown
+                    if float(strategy_balance.high_water_mark) > 0:
+                        drawdown_usd = float(strategy_balance.high_water_mark) - current_value
+                        drawdown_pct = drawdown_usd / float(strategy_balance.high_water_mark)
+                        if drawdown_usd > float(strategy_balance.max_drawdown_usd):
+                            strategy_balance.max_drawdown_usd = drawdown_usd
+                            strategy_balance.max_drawdown_pct = drawdown_pct
+
+                    logger.info(
+                        "Strategy balance updated on resolution",
+                        strategy=strategy_name,
+                        pnl=result["pnl"],
+                        new_balance=strategy_balance.current_usd,
+                    )
+
+                # Send Telegram alert
+                try:
+                    alert_position_closed(
+                        strategy=result["strategy_name"],
+                        market=market.slug,
+                        side=result["side"],
+                        outcome=outcome,
+                        cost_basis=result["cost_basis"],
+                        payout=result["payout"],
+                        pnl=result["pnl"],
+                        market_id=market.id,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send Telegram alert: {e}")
+
+            # Update paper balance totals
+            new_balance = float(paper_balance.balance_usd)
+            paper_balance.total_pnl = new_balance - float(paper_balance.starting_balance_usd)
+            if new_balance > float(paper_balance.high_water_mark):
+                paper_balance.high_water_mark = new_balance
+            if new_balance < float(paper_balance.low_water_mark):
+                paper_balance.low_water_mark = new_balance
+
+        logger.info(
+            "Market resolved",
+            market=market.slug,
+            outcome=outcome,
+            positions_closed=len(results) if results else 0,
+        )
+
+    return {"positions_closed": positions_closed, "total_pnl": total_pnl}
 
 
 @shared_task(name="src.tasks.discovery.cleanup_stale_markets")

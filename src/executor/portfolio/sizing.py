@@ -41,25 +41,32 @@ class PositionSizer:
         signal: Signal,
         available_capital: float,
         sizing_config: Optional[SizingConfig] = None,
+        strategy_capital: Optional[float] = None,
     ) -> float:
         """
         Calculate position size for a signal.
 
         Args:
             signal: Trading signal
-            available_capital: Max available capital for this trade
+            available_capital: Max available capital for this trade (after position limits)
             sizing_config: Optional sizing config override
+            strategy_capital: Total capital allocated to this strategy (for Kelly sizing)
 
         Returns:
             Position size in USD
         """
         sizing = sizing_config or self.config.get_effective_sizing(signal.strategy_name)
 
+        # For Kelly sizing, use strategy_capital as the base for fraction calculation
+        # Default to 400 if not provided (standard per-strategy allocation)
+        kelly_capital = strategy_capital if strategy_capital is not None else 400.0
+
         # Calculate base size based on method
         if sizing.method == SizingMethod.FIXED:
             size = self._fixed_size(sizing)
         elif sizing.method == SizingMethod.KELLY:
-            size = self._kelly_size(signal, sizing)
+            # Kelly uses full strategy capital for fraction calculation
+            size = self._kelly_size(signal, sizing, strategy_capital=kelly_capital)
         elif sizing.method == SizingMethod.VOLATILITY_SCALED:
             size = self._volatility_scaled_size(signal, sizing, available_capital)
         else:
@@ -86,57 +93,88 @@ class PositionSizer:
         """Calculate fixed position size."""
         return sizing.fixed_amount_usd
 
-    def _kelly_size(self, signal: Signal, sizing: SizingConfig) -> float:
+    def _kelly_size(
+        self,
+        signal: Signal,
+        sizing: SizingConfig,
+        strategy_capital: float = 400.0,
+    ) -> float:
         """
         Calculate position size using Kelly criterion.
 
-        Kelly formula: f = (p * (b + 1) - 1) / b
+        Kelly formula: f* = (p * b - q) / b
         Where:
-        - f = fraction of capital to bet
-        - p = probability of winning
-        - b = odds (profit if win / loss if lose)
+        - f* = fraction of capital to bet
+        - p = probability of winning (our estimate)
+        - q = 1 - p (probability of losing)
+        - b = odds = profit_if_win / loss_if_lose
 
-        For prediction markets:
-        - p = signal.confidence (estimated probability we're right)
-        - b = (1 - price) / price for buying YES at price
+        For prediction markets buying at price `c`:
+        - profit_if_win = 1 - c (we get $1, paid $c)
+        - loss_if_lose = c (we lose our stake)
+        - b = (1 - c) / c
 
         We use fractional Kelly (kelly_fraction) to be more conservative.
         """
-        # Use confidence as probability estimate
+        # Use confidence as probability estimate (expected win rate)
         p = signal.confidence if signal.confidence else 0.5
+        q = 1 - p
 
         # Edge is the expected return per dollar
         edge = signal.edge if signal.edge else 0.0
 
-        if edge <= 0 or p <= 0.5:
-            # No edge or not confident, use minimum
+        if edge <= 0:
+            # No edge, use minimum
+            logger.debug(f"Kelly: no edge ({edge}), using minimum")
             return sizing.fixed_amount_usd
 
-        # Calculate odds from edge and probability
-        # edge = p * profit - (1-p) * loss
-        # For unit bet: edge = p * (1/price - 1) - (1-p)
-        # Simplify to: b = edge / (1 - p) approximately
-        if p < 1:
-            b = max(edge / (1 - p), 0.1)
-        else:
-            b = 10  # Cap odds
+        # Get execution price from decision_inputs if available
+        # For NO bets, this is the NO ask price (what we pay)
+        price = None
+        if hasattr(signal, 'decision_inputs') and signal.decision_inputs:
+            price = signal.decision_inputs.get('no_ask')
 
-        # Full Kelly
-        kelly = (p * (b + 1) - 1) / b if b > 0 else 0
+        if price is None:
+            # Fallback: derive price from signal's price_at_signal
+            # For NO bets, NO price ≈ 1 - YES price
+            if signal.price_at_signal:
+                price = 1 - signal.price_at_signal
+            else:
+                price = 0.5  # Default to 50%
 
-        # Apply fractional Kelly
-        kelly = kelly * sizing.kelly_fraction
+        if price <= 0 or price >= 1:
+            logger.debug(f"Kelly: invalid price ({price}), using minimum")
+            return sizing.fixed_amount_usd
 
-        # Convert to position size (using available capital as base)
-        # Note: This should be applied to total capital, but we use
-        # fixed_amount as a proxy for capital allocation to this strategy
-        base_capital = sizing.fixed_amount_usd * 10  # Assume 10x allocation
-        size = base_capital * kelly
+        # Calculate odds: b = profit / loss = (1 - price) / price
+        b = (1 - price) / price
 
-        # Clamp to reasonable range
-        size = max(sizing.fixed_amount_usd, min(size, sizing.fixed_amount_usd * 4))
+        # Kelly formula: f* = (p * b - q) / b
+        # Equivalent to: f* = p - q/b = p - q*price/(1-price)
+        kelly = (p * b - q) / b if b > 0 else 0
 
-        return size
+        if kelly <= 0:
+            # Kelly says don't bet (edge not sufficient for win rate)
+            logger.debug(f"Kelly: negative ({kelly:.4f}), using minimum. p={p}, b={b}")
+            return sizing.fixed_amount_usd
+
+        # Apply fractional Kelly for safety
+        fractional_kelly = kelly * sizing.kelly_fraction
+
+        # Convert to position size using strategy capital
+        size = strategy_capital * fractional_kelly
+
+        logger.debug(
+            f"Kelly sizing: p={p:.2f}, price={price:.3f}, b={b:.2f}, "
+            f"full_kelly={kelly:.2%}, frac_kelly={fractional_kelly:.2%}, "
+            f"capital=${strategy_capital}, size=${size:.2f}"
+        )
+
+        # Apply min/max bounds
+        min_size = sizing.fixed_amount_usd
+        max_size = sizing.max_size_usd or 100.0
+
+        return max(min_size, min(size, max_size))
 
     def _volatility_scaled_size(
         self,

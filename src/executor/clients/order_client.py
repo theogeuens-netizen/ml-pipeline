@@ -11,8 +11,6 @@ Handles:
 
 Supports SOCKS5 proxy for bypassing IP blocks.
 
-Adapted from futarchy/backend/app/services/polymarket_order_client.py
-
 IMPORTANT: Proxy configuration is deferred to client initialization to avoid
 polluting global environment variables that affect other HTTP clients.
 """

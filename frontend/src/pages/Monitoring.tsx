@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMonitoringHealth, useMonitoringErrors, useFieldCompleteness, useWebSocketCoverage, useSubscriptionHealth, useConnectionStatus, useTierTransitions, useTaskActivity, useRedisStats, useLifecycleStatus } from '../hooks/useData'
+import { useMonitoringHealth, useMonitoringErrors, useFieldCompleteness, useWebSocketCoverage, useSubscriptionHealth, useConnectionStatus, useTierTransitions, useTaskActivity, useRedisStats, useLifecycleStatus, useCategorizationMetrics, useCategorizationRuns, useCategorizationRules } from '../hooks/useData'
 import { clsx } from 'clsx'
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -24,6 +24,9 @@ export default function Monitoring() {
   const { data: taskActivity } = useTaskActivity(30)
   const { data: redisStats } = useRedisStats()
   const { data: lifecycleStatus } = useLifecycleStatus()
+  const { data: catMetrics } = useCategorizationMetrics()
+  const { data: catRuns } = useCategorizationRuns(10, 0)
+  const { data: catRules } = useCategorizationRules(20, 0)
   const [selectedError, setSelectedError] = useState<number | null>(null)
 
   if (healthLoading || completenessLoading) {
@@ -211,6 +214,99 @@ export default function Monitoring() {
           ) : (
             <div className="text-gray-400">Loading...</div>
           )}
+        </div>
+      </div>
+
+      {/* Categorization Metrics */}
+      <div className="grid grid-cols-1 gap-4">
+        <div className="bg-gray-800 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">Categorization (Codex)</h2>
+            <span className="text-xs text-gray-400">
+              Last run: {catMetrics?.last_run?.started_at ? new Date(catMetrics.last_run.started_at).toLocaleString() : '—'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <CardStat label="Runs (24h)" value={catMetrics?.runs_24h ?? 0} />
+            <CardStat label="Saved (24h)" value={catMetrics?.markets_saved_24h ?? 0} />
+            <CardStat label="Quarantined (24h)" value={catMetrics?.quarantined_24h ?? 0} />
+            <CardStat label="Tokens (24h)" value={catMetrics?.tokens_24h ?? 0} />
+          </div>
+          {catRuns?.items?.length ? (
+            <div className="mt-6 overflow-auto">
+              <table className="min-w-full text-sm text-gray-300">
+                <thead className="text-xs uppercase text-gray-400">
+                  <tr className="border-b border-gray-700">
+                    <th className="py-2 pr-4 text-left">Run ID</th>
+                    <th className="py-2 pr-4 text-left">Started</th>
+                    <th className="py-2 pr-4 text-left">Status</th>
+                    <th className="py-2 pr-4 text-right">Saved</th>
+                    <th className="py-2 pr-4 text-right">Quarantine</th>
+                    <th className="py-2 pr-4 text-right">Tokens</th>
+                    <th className="py-2 pr-4 text-left">Error</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {catRuns.items.map((r) => (
+                    <tr key={r.run_id} className="border-b border-gray-700/60">
+                      <td className="py-2 pr-4 font-mono text-xs text-gray-400 truncate">{r.run_id.slice(0, 8)}</td>
+                      <td className="py-2 pr-4 text-xs">{r.started_at ? new Date(r.started_at).toLocaleTimeString() : '—'}</td>
+                      <td className="py-2 pr-4">
+                        <span className={clsx(
+                          'px-2 py-1 rounded text-xs font-medium',
+                          r.status === 'success' ? 'bg-green-900 text-green-300' :
+                          r.status === 'failed' ? 'bg-red-900 text-red-300' :
+                          'bg-gray-700 text-gray-300'
+                        )}>
+                          {r.status || 'unknown'}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 text-right">{r.markets_saved ?? 0}</td>
+                      <td className="py-2 pr-4 text-right">{r.quarantined ?? 0}</td>
+                      <td className="py-2 pr-4 text-right">{r.total_tokens ?? 0}</td>
+                      <td className="py-2 pr-4 text-xs text-red-300 truncate max-w-xs">{r.error || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-gray-400 text-sm mt-4">No recent runs.</div>
+          )}
+          {catRules?.items?.length ? (
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-white">Rule-based categorization</h3>
+                <span className="text-xs text-gray-400">Top {catRules.items.length} by matches</span>
+              </div>
+              <div className="overflow-auto">
+                <table className="min-w-full text-sm text-gray-300">
+                  <thead className="text-xs uppercase text-gray-400">
+                    <tr className="border-b border-gray-700">
+                      <th className="py-2 pr-4 text-left">Rule</th>
+                      <th className="py-2 pr-4 text-left">L1/L2</th>
+                      <th className="py-2 pr-4 text-right">Matched</th>
+                      <th className="py-2 pr-4 text-right">Validated</th>
+                      <th className="py-2 pr-4 text-right">Accuracy</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {catRules.items.map((r) => (
+                      <tr key={r.id} className="border-b border-gray-700/60">
+                        <td className="py-2 pr-4 text-xs text-gray-100">{r.name}</td>
+                        <td className="py-2 pr-4 text-xs text-gray-400">{r.l1}/{r.l2}</td>
+                        <td className="py-2 pr-4 text-right">{r.times_matched}</td>
+                        <td className="py-2 pr-4 text-right">{r.times_validated}</td>
+                        <td className="py-2 pr-4 text-right">
+                          {r.accuracy !== null ? `${(r.accuracy * 100).toFixed(1)}%` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -606,6 +702,15 @@ export default function Monitoring() {
           <p className="text-gray-400">No recent errors. System is running smoothly.</p>
         )}
       </div>
+    </div>
+  )
+}
+
+function CardStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="bg-gray-900 rounded-lg p-4">
+      <div className="text-xs uppercase text-gray-500 mb-1">{label}</div>
+      <div className="text-xl font-semibold text-white">{value}</div>
     </div>
   )
 }

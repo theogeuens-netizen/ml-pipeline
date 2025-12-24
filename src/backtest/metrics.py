@@ -1,8 +1,6 @@
 """
 Comprehensive performance metrics calculation for backtesting.
 
-Ported from futarchy's backtesting infrastructure.
-
 Metrics Categories:
 - Return Metrics
 - Risk Metrics

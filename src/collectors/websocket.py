@@ -583,6 +583,14 @@ class MultiConnectionCollector:
             max_markets=self.num_connections * MAX_SUBSCRIPTIONS,
         )
 
+        # Clear stale entries from Redis ws:connected set
+        # This ensures we don't have leftover entries from previous sessions
+        redis = RedisClient()
+        try:
+            await redis.clear_ws_connected()
+        finally:
+            await redis.close()
+
         # Create collectors (managed mode - subscriptions handled by MultiConnectionCollector)
         for i in range(self.num_connections):
             collector = WebSocketCollector(managed=True)

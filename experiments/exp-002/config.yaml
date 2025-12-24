@@ -1,0 +1,203 @@
+experiment_id: exp-002
+created_at: 2024-12-23T14:30:00Z
+
+backtest:
+  initial_capital: 1000
+  stake_mode: fixed
+  stake_per_bet: 10
+  cost_per_bet: 0.0
+  max_position_pct: 0.25
+
+# Base filters (some variants override these)
+filters:
+  categories: null  # all categories
+  min_volume_24h: 2000  # default, variants override
+  hours_to_expiry:
+    min: 24
+    max: 72
+
+strategy:
+  type: uncertain_zone
+  side: NO
+  yes_price_min: 0.45
+  yes_price_max: 0.55
+
+# 20 variants to test
+variants:
+  # Time Window Variants (v1-v6)
+  - id: v1
+    name: time_1h_4h
+    min_hours: 1
+    max_hours: 4
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+
+  - id: v2
+    name: time_4h_12h
+    min_hours: 4
+    max_hours: 12
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+
+  - id: v3
+    name: time_12h_36h
+    min_hours: 12
+    max_hours: 36
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+
+  - id: v4
+    name: time_24h_72h
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+
+  - id: v5
+    name: time_36h_96h
+    min_hours: 36
+    max_hours: 96
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+
+  - id: v6
+    name: time_72h_168h
+    min_hours: 72
+    max_hours: 168
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+
+  # Price Band Variants (v7-v12)
+  - id: v7
+    name: price_48_52
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_volume: 2000
+
+  - id: v8
+    name: price_47_53
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.47
+    yes_price_max: 0.53
+    min_volume: 2000
+
+  - id: v9
+    name: price_46_54
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.46
+    yes_price_max: 0.54
+    min_volume: 2000
+
+  - id: v10
+    name: price_45_55
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+
+  - id: v11
+    name: price_43_57
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.43
+    yes_price_max: 0.57
+    min_volume: 2000
+
+  - id: v12
+    name: price_40_60
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.40
+    yes_price_max: 0.60
+    min_volume: 2000
+
+  # Category Variants (v13-v15)
+  - id: v13
+    name: category_crypto
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+    category: Crypto
+
+  - id: v14
+    name: category_sports
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+    category: Sports
+
+  - id: v15
+    name: category_politics
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+    category: Politics
+
+  # Volume Variants (v16-v20)
+  - id: v16
+    name: volume_100
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 100
+
+  - id: v17
+    name: volume_500
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 500
+
+  - id: v18
+    name: volume_2000
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 2000
+
+  - id: v19
+    name: volume_5000
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 5000
+
+  - id: v20
+    name: volume_10000
+    min_hours: 24
+    max_hours: 72
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+    min_volume: 10000
+
+robustness:
+  time_split: true
+  category_split: true
+  liquidity_split: true
+
+kill_criteria:
+  sharpe: 0.5
+  win_rate: 0.52
+  trades: 30
+  profit_factor: 1.15

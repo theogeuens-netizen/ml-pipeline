@@ -84,6 +84,33 @@ class PerformanceTracker:
     def __init__(self, session: Session):
         self.session = session
 
+    def ensure_strategy_balances(self):
+        """Ensure every enabled strategy has a balance row so it surfaces in analytics/UI."""
+        from strategies.loader import load_strategies
+
+        existing = {
+            name for (name,) in self.session.query(StrategyBalance.strategy_name).all()
+        }
+        created = False
+
+        for strat in load_strategies(enabled_only=True):
+            if strat.name in existing:
+                continue
+
+            allocated = getattr(strat, "allocated_usd", 400.0)
+            balance = StrategyBalance(
+                strategy_name=strat.name,
+                allocated_usd=allocated,
+                current_usd=allocated,
+                high_water_mark=allocated,
+                low_water_mark=allocated,
+            )
+            self.session.add(balance)
+            created = True
+
+        if created:
+            self.session.commit()
+
     def get_strategy_metrics(self, strategy_name: str) -> Optional[StrategyMetrics]:
         """
         Get comprehensive metrics for a single strategy.
@@ -94,6 +121,9 @@ class PerformanceTracker:
         Returns:
             StrategyMetrics or None if strategy not found
         """
+        # Seed balances so new strategies show up immediately in the UI
+        self.ensure_strategy_balances()
+
         # Get balance info
         balance = self.session.query(StrategyBalance).filter(
             StrategyBalance.strategy_name == strategy_name
@@ -102,13 +132,35 @@ class PerformanceTracker:
         if not balance:
             return None
 
+        # Calculate unrealized P&L from actual open positions (not stale DB value)
+        open_positions = self.session.query(Position).filter(
+            Position.strategy_name == strategy_name,
+            Position.status == "open",
+            Position.is_paper == True,
+        ).all()
+
+        unrealized_pnl = sum(
+            float(p.unrealized_pnl) if p.unrealized_pnl else 0
+            for p in open_positions
+        )
+        cost_basis = sum(
+            float(p.cost_basis) if p.cost_basis else 0
+            for p in open_positions
+        )
+
+        realized_pnl = float(balance.realized_pnl)
+        total_pnl = realized_pnl + unrealized_pnl
+
+        # Cash = allocated - cost_basis + realized
+        cash = float(balance.allocated_usd) - cost_basis + realized_pnl
+
         metrics = StrategyMetrics(
             strategy_name=strategy_name,
             allocated_usd=float(balance.allocated_usd),
-            current_usd=float(balance.current_usd),
-            total_pnl=float(balance.total_pnl),
-            realized_pnl=float(balance.realized_pnl),
-            unrealized_pnl=float(balance.unrealized_pnl),
+            current_usd=round(cash, 2),  # Recalculated cash
+            total_pnl=round(total_pnl, 2),  # Recalculated
+            realized_pnl=round(realized_pnl, 2),
+            unrealized_pnl=round(unrealized_pnl, 2),  # From actual positions
             trade_count=balance.trade_count,
             win_count=balance.win_count,
             loss_count=balance.loss_count,
@@ -122,10 +174,16 @@ class PerformanceTracker:
 
         if metrics.allocated_usd > 0:
             metrics.total_return_pct = (metrics.total_pnl / metrics.allocated_usd) * 100
+            # Calculate drawdown from current portfolio value vs high water mark
+            position_value = sum(
+                float(p.current_value) if p.current_value else float(p.cost_basis or 0)
+                for p in open_positions
+            )
+            portfolio_value = cash + position_value
+            high_water = max(float(balance.high_water_mark), metrics.allocated_usd)
             metrics.current_drawdown_pct = (
-                (float(balance.high_water_mark) - metrics.current_usd)
-                / float(balance.high_water_mark) * 100
-                if float(balance.high_water_mark) > 0 else 0
+                (high_water - portfolio_value) / high_water * 100
+                if high_water > 0 else 0
             )
 
         # Get position stats
@@ -137,8 +195,14 @@ class PerformanceTracker:
         return metrics
 
     def _calculate_position_stats(self, metrics: StrategyMetrics):
-        """Calculate stats from closed positions."""
-        # Get closed positions
+        """Calculate stats from closed and open positions."""
+        # Always count open positions first
+        metrics.open_positions = self.session.query(Position).filter(
+            Position.strategy_name == metrics.strategy_name,
+            Position.status == "open"
+        ).count()
+
+        # Get closed positions for P&L stats
         closed = self.session.query(Position).filter(
             Position.strategy_name == metrics.strategy_name,
             Position.status == "closed"
@@ -183,12 +247,6 @@ class PerformanceTracker:
         if sorted_by_exit:
             metrics.first_trade = sorted_by_exit[0].exit_time
             metrics.last_trade = sorted_by_exit[-1].exit_time
-
-        # Open positions
-        metrics.open_positions = self.session.query(Position).filter(
-            Position.strategy_name == metrics.strategy_name,
-            Position.status == "open"
-        ).count()
 
     def _calculate_risk_metrics(self, metrics: StrategyMetrics):
         """Calculate Sharpe and Sortino ratios from daily returns."""
@@ -259,6 +317,9 @@ class PerformanceTracker:
         Returns:
             List of StrategyMetrics sorted by chosen metric
         """
+        # Ensure we have balance rows for every enabled strategy (including newly added)
+        self.ensure_strategy_balances()
+
         # Get all strategy names
         balances = self.session.query(StrategyBalance).all()
 

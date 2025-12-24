@@ -6,6 +6,18 @@ description: Categorize Polymarket markets using L1/L2/L3 taxonomy
 
 You are categorizing Polymarket prediction markets into a 3-level taxonomy.
 
+## Database Location
+
+**Project root**: `/home/theo/polymarket-ml`
+**Database**: `polymarket_ml` (Polymarket only - NO Kalshi data)
+
+**Data sources**:
+- `markets` table - Live market data with L1/L2/L3 category columns
+- `historical_markets` - Migrated historical data (less granular)
+
+**IMPORTANT**: All CLI commands MUST be run from `/home/theo/polymarket-ml`.
+Do NOT access any other database or project directory.
+
 ## Available Commands
 
 | Command | Description |

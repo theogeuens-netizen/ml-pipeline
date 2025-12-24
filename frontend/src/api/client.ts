@@ -296,6 +296,7 @@ export interface ExecutorStatus {
   risk_limits: {
     max_position_usd: number
     max_total_exposure_usd: number
+    max_positions_per_strategy: number | null
     max_positions: number
     max_drawdown_pct: number
   }
@@ -432,6 +433,7 @@ export interface ExecutorConfig {
   risk: {
     max_position_usd: number
     max_total_exposure_usd: number
+    max_positions_per_strategy: number
     max_positions: number
     max_drawdown_pct: number
   }
@@ -498,6 +500,136 @@ export interface WalletSyncResult {
   usdc_balance: number
 }
 
+// Analyst dashboard types
+export interface StrategyBalance {
+  name: string
+  allocated_usd: number
+  current_usd: number
+  position_value: number
+  portfolio_value: number
+  total_pnl: number
+  realized_pnl: number
+  unrealized_pnl: number
+  trade_count: number
+  win_count: number
+  loss_count: number
+  win_rate: number
+  max_drawdown_pct: number
+}
+
+export interface StrategyBalancesResponse {
+  total: number
+  total_allocated: number
+  total_current: number
+  total_pnl: number
+  strategies: StrategyBalance[]
+}
+
+export interface LeaderboardStrategy {
+  strategy_name: string
+  allocated_usd: number
+  current_usd: number
+  total_pnl: number
+  realized_pnl: number
+  unrealized_pnl: number
+  total_return_pct: number
+  trade_count: number
+  win_count: number
+  loss_count: number
+  win_rate: number
+  sharpe_ratio: number | null
+  sortino_ratio: number | null
+  max_drawdown_usd: number
+  max_drawdown_pct: number
+  current_drawdown_pct: number
+  avg_win_usd: number | null
+  avg_loss_usd: number | null
+  profit_factor: number | null
+  expectancy_usd: number | null
+  avg_hold_hours: number | null
+  open_positions: number
+  first_trade: string | null
+  last_trade: string | null
+}
+
+export interface LeaderboardResponse {
+  sort_by: string
+  total: number
+  strategies: LeaderboardStrategy[]
+}
+
+export interface EquityCurveDataPoint {
+  date: string
+  daily_pnl: number
+  trade_count: number
+  value: number
+  cumulative_pnl: number
+}
+
+export interface EquityCurveChartPoint {
+  date: string
+  realized: number
+  unrealized: number
+  total: number
+  baseline: number
+}
+
+export interface EquityCurveSummary {
+  total_allocated: number
+  total_realized: number
+  total_unrealized: number
+  portfolio_value: number
+}
+
+export interface EquityCurveResponse {
+  start_date: string
+  end_date: string
+  days: number
+  strategies: Record<string, EquityCurveDataPoint[]>
+  total: EquityCurveDataPoint[]
+  chart_data: EquityCurveChartPoint[]
+  summary: EquityCurveSummary
+  allocations: Record<string, number>
+}
+
+export interface FunnelStatsResponse {
+  period_hours: number
+  total_decisions: number
+  executed: number
+  rejected: number
+  profitable: number
+  execution_rate: number
+  win_rate: number
+  rejection_reasons: Record<string, number>
+  by_strategy: Record<string, { total: number; executed: number; rejected: number }>
+}
+
+export interface TradeDecision {
+  id: number
+  timestamp: string | null
+  strategy_name: string
+  strategy_sha: string
+  market_id: number | null
+  condition_id: string | null
+  market_snapshot: Record<string, unknown> | null
+  decision_inputs: Record<string, unknown> | null
+  signal_side: string | null
+  signal_reason: string | null
+  signal_edge: number | null
+  signal_size_usd: number | null
+  executed: boolean
+  rejected_reason: string | null
+  execution_price: number | null
+  position_id: number | null
+}
+
+export interface DecisionsResponse {
+  total: number
+  limit: number
+  offset: number
+  items: TradeDecision[]
+}
+
 // Database browser types
 export interface TableInfo {
   name: string
@@ -511,6 +643,62 @@ export interface TableData {
   offset: number
   columns: string[]
   items: Record<string, unknown>[]
+}
+
+// Categorization metrics
+export interface CategorizationMetrics {
+  timestamp: string
+  last_run: {
+    run_id: string
+    started_at: string | null
+    completed_at: string | null
+    markets_saved: number | null
+    total_tokens: number | null
+    status?: string | null
+  } | null
+  last_success: {
+    run_id: string
+    started_at: string | null
+    completed_at: string | null
+    markets_saved: number | null
+    total_tokens: number | null
+    status?: string | null
+  } | null
+  runs_24h: number
+  success_24h: number
+  markets_saved_24h: number
+  tokens_24h: number
+  quarantined_24h: number
+}
+
+export interface CategorizationRun {
+  run_id: string
+  started_at: string | null
+  completed_at: string | null
+  model: string | null
+  batch_size: number | null
+  markets_fetched: number | null
+  markets_sent: number | null
+  markets_saved: number | null
+  quarantined: number | null
+  retry_count: number | null
+  status: string | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  total_tokens: number | null
+  error: string | null
+}
+
+export interface RuleStat {
+  id: number
+  name: string
+  l1: string
+  l2: string
+  times_matched: number
+  times_validated: number
+  times_correct: number
+  accuracy: number | null
+  enabled: boolean
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -715,6 +903,7 @@ export const api = {
   updateRiskConfig: async (config: Partial<{
     max_position_usd: number
     max_total_exposure_usd: number
+    max_positions_per_strategy: number
     max_positions: number
     max_drawdown_pct: number
   }>) => {
@@ -762,4 +951,203 @@ export const api = {
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     return response.json() as Promise<WalletSyncResult>
   },
+
+  // Analyst dashboard endpoints
+  getStrategyBalances: () => fetchJson<StrategyBalancesResponse>('/api/executor/strategies/balances'),
+
+  getLeaderboard: (sortBy = 'total_pnl') =>
+    fetchJson<LeaderboardResponse>(`/api/executor/strategies/leaderboard?sort_by=${sortBy}`),
+
+  getEquityCurve: (days = 30, strategy?: string) => {
+    const params = new URLSearchParams({ days: String(days) })
+    if (strategy) params.set('strategy', strategy)
+    return fetchJson<EquityCurveResponse>(`/api/executor/strategies/equity-curve?${params}`)
+  },
+
+  getFunnelStats: (hours = 24, strategy?: string) => {
+    const params = new URLSearchParams({ hours: String(hours) })
+    if (strategy) params.set('strategy', strategy)
+    return fetchJson<FunnelStatsResponse>(`/api/executor/strategies/funnel-stats?${params}`)
+  },
+
+  getDecisions: (params?: {
+    strategy?: string
+    executed?: boolean
+    limit?: number
+    offset?: number
+  }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.strategy) searchParams.set('strategy', params.strategy)
+    if (params?.executed !== undefined) searchParams.set('executed', String(params.executed))
+    if (params?.limit) searchParams.set('limit', String(params.limit))
+    if (params?.offset) searchParams.set('offset', String(params.offset))
+    const qs = searchParams.toString()
+    return fetchJson<DecisionsResponse>(`/api/executor/decisions${qs ? `?${qs}` : ''}`)
+  },
+
+  getStrategyMetrics: (name: string) => fetchJson<LeaderboardStrategy>(`/api/executor/strategies/${name}/metrics`),
+
+  getStrategyDebug: (name: string) => fetchJson<{
+    strategy_name: string
+    params: Record<string, unknown>
+    recent_decisions: TradeDecision[]
+    funnel_stats: Record<string, unknown>
+  }>(`/api/executor/strategies/${name}/debug`),
+
+  // Analytics endpoints
+  getCapitalAnalytics: () => fetchJson<CapitalAnalytics>('/api/executor/analytics/capital'),
+
+  getPositionAnalytics: () => fetchJson<PositionAnalytics>('/api/executor/analytics/positions'),
+
+  getSignalAnalytics: (hours = 6) => fetchJson<SignalAnalytics>(`/api/executor/analytics/signals?hours=${hours}`),
+
+  getMarketPipeline: () => fetchJson<MarketPipeline>('/api/executor/analytics/pipeline'),
+
+  // Portfolio summary for dashboard header
+  getPortfolioSummary: () => fetchJson<PortfolioSummary>('/api/executor/portfolio/summary'),
+
+  // CSV export URL builder
+  getPositionsExportUrl: (params?: { status?: string; strategy?: string }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.status) searchParams.set('status', params.status)
+    if (params?.strategy) searchParams.set('strategy', params.strategy)
+    const qs = searchParams.toString()
+    return `/api/executor/positions/export${qs ? `?${qs}` : ''}`
+  },
+
+  // Categorization monitoring
+  getCategorizationMetrics: () => fetchJson<CategorizationMetrics>('/api/categorization/metrics'),
+  getCategorizationRuns: (limit = 50, offset = 0) =>
+    fetchJson<{ items: CategorizationRun[]; limit: number; offset: number }>(
+      `/api/categorization/runs?limit=${limit}&offset=${offset}`
+    ),
+  getCategorizationRules: (limit = 50, offset = 0) =>
+    fetchJson<{ items: RuleStat[]; limit: number; offset: number }>(
+      `/api/categorization/rules?limit=${limit}&offset=${offset}`
+    ),
+}
+
+// Analytics types
+export interface CapitalAnalytics {
+  timestamp: string
+  totals: {
+    allocated: number
+    cash: number
+    deployed: number
+    position_value: number
+    utilization_pct: number
+  }
+  strategies: {
+    strategy_name: string
+    allocated_usd: number
+    cash_usd: number
+    deployed_usd: number
+    position_value_usd: number
+    position_count: number
+    utilization_pct: number
+    available_usd: number
+    is_blocked: boolean
+  }[]
+}
+
+export interface PositionAnalytics {
+  timestamp: string
+  total_positions: number
+  age_buckets: Record<string, number>
+  pending_resolution_count: number
+  by_strategy: Record<string, {
+    count: number
+    avg_age: number
+    overdue: number
+    pending_resolution: number
+  }>
+  pending_resolution: {
+    strategy_name: string
+    market_id: number
+    market_question: string
+    end_date: string
+    entry_time: string
+    cost_basis: number
+    current_value: number
+    unrealized_pnl: number
+    age_hours: number
+    expected_hold_hours: number
+    is_overdue: boolean
+    market_status: string
+  }[]
+  oldest_positions: {
+    strategy_name: string
+    market_id: number
+    market_question: string
+    age_hours: number
+    is_overdue: boolean
+    market_status: string
+  }[]
+}
+
+export interface SignalAnalytics {
+  timestamp: string
+  period_hours: number
+  strategies: {
+    strategy_name: string
+    total_signals: number
+    executed: number
+    rejected: number
+    execution_rate_pct: number
+    unique_markets: number
+    last_signal: string
+  }[]
+  rejection_breakdown: { reason: string; count: number }[]
+  missed_opportunities: { strategy_name: string; missed_markets: number }[]
+  hourly_trend: { hour: string; signals: number; executed: number }[]
+}
+
+export interface MarketPipeline {
+  timestamp: string
+  summary: {
+    total_in_window: number
+    new_opportunities_now: number
+    new_opportunities_approaching: number
+    status: 'opportunities' | 'pipeline' | 'saturated'
+  }
+  by_window: Record<string, {
+    window: string
+    in_window: number
+    in_window_new: number
+    in_window_holding: number
+    approaching: number
+    approaching_new: number
+    approaching_time: string
+    markets_in_window: {
+      id: number
+      question: string
+      price: number
+      hours_to_close: number
+      has_position: boolean
+    }[]
+    markets_approaching: {
+      id: number
+      question: string
+      price: number
+      hours_to_close: number
+      has_position: boolean
+    }[]
+  }>
+}
+
+// Portfolio summary for dashboard header
+export interface PortfolioSummary {
+  timestamp: string
+  cash: number
+  position_value: number
+  portfolio_value: number
+  unrealized_pnl: number
+  realized_pnl: number
+  total_pnl: number
+  total_return_pct: number
+  open_positions: number
+  strategies_count: number
+  total_allocated: number
+  high_water_mark: number
+  current_drawdown_pct: number
 }

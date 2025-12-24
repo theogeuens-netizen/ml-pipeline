@@ -82,9 +82,15 @@ def alert_trade(
     price: float,
     size: float,
     edge: Optional[float] = None,
+    expected_win_rate: Optional[float] = None,
+    order_type: str = "market",
+    best_bid: Optional[float] = None,
+    best_ask: Optional[float] = None,
+    hours_to_close: Optional[float] = None,
+    signal_price: Optional[float] = None,
 ) -> bool:
     """
-    Send a trade alert.
+    Send a detailed trade alert with full transparency on edge calculation.
 
     Args:
         strategy: Strategy/algorithm name
@@ -94,33 +100,82 @@ def alert_trade(
         token_side: Which token was bought (YES or NO)
         price: Execution price (probability)
         size: Trade size in USD
-        edge: Optional edge estimate
+        edge: Edge as calculated at signal time (may differ from execution)
+        expected_win_rate: Expected win rate from backtests (for this token side)
+        order_type: Order execution type (market/limit/spread)
+        best_bid: Best bid at time of trade
+        best_ask: Best ask at time of trade
+        hours_to_close: Hours until market closes
+        signal_price: Price when signal was generated (before slippage)
     """
+    from datetime import datetime, timezone
+
     emoji = "🟢" if token_side == "YES" else "🔴"
+    now = datetime.now(timezone.utc)
 
-    # Calculate YES/NO odds from price
-    # If buying YES token, price is YES probability
-    # If buying NO token, price is NO probability, so YES = 1 - price
-    if token_side == "YES":
-        yes_odds = price
-        no_odds = 1 - price
+    # Price in cents for clarity
+    price_cents = price * 100
+
+    # Calculate time to close
+    if hours_to_close:
+        if hours_to_close < 1:
+            time_str = f"{int(hours_to_close * 60)}m"
+        elif hours_to_close < 24:
+            time_str = f"{hours_to_close:.1f}h"
+        else:
+            time_str = f"{hours_to_close / 24:.1f}d"
     else:
-        no_odds = price
-        yes_odds = 1 - price
+        time_str = "unknown"
 
-    edge_str = f"\nEdge: {edge:.1%}" if edge else ""
+    # Build the edge explanation
+    # Edge = (expected_win_rate - price) / price
+    # This is the expected return if the historical win rate holds
+    edge_section = ""
+    if expected_win_rate and price > 0:
+        # Calculate expected value and profit per share
+        ev_per_share = expected_win_rate  # If we win, we get $1
+        cost_per_share = price
+        profit_per_share = ev_per_share - cost_per_share
+        expected_return = profit_per_share / cost_per_share
+
+        edge_section = (
+            f"\n━━━ <b>EDGE ANALYSIS</b> ━━━\n"
+            f"Historical {token_side} win rate: <b>{expected_win_rate:.1%}</b>\n"
+            f"We paid: {price_cents:.1f}¢/share\n"
+            f"Expected value: {expected_win_rate * 100:.1f}¢/share\n"
+            f"Expected profit: <b>{profit_per_share * 100:+.1f}¢/share ({expected_return:+.0%})</b>"
+        )
+
+    # Build execution details
+    exec_section = f"\n━━━ <b>EXECUTION</b> ━━━\n"
+    exec_section += f"Order type: {order_type.upper()}"
+
+    if best_bid is not None and best_ask is not None:
+        spread_cents = (best_ask - best_bid) * 100
+        mid = (best_bid + best_ask) / 2
+        exec_section += (
+            f"\nBook: {best_bid*100:.1f}¢ / {best_ask*100:.1f}¢ (spread: {spread_cents:.1f}¢)\n"
+            f"Filled at: {price_cents:.1f}¢"
+        )
+        # Show slippage from mid
+        slippage = price - mid
+        if abs(slippage) > 0.001:
+            exec_section += f" (slippage: {slippage*100:+.2f}¢)"
+
+    exec_section += f"\nTime: {now.strftime('%H:%M:%S')} UTC"
 
     message = (
-        f"{emoji} <b>NEW TRADE</b>\n"
+        f"{emoji} <b>{token_side} BET PLACED</b>\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"<b>Market:</b> {market_title[:80]}\n"
-        f"<b>ID:</b> {market_id}\n"
+        f"<b>{market_title[:70]}</b>\n"
+        f"Closes in: {time_str}\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"<b>Odds:</b> YES {yes_odds:.0%} / NO {no_odds:.0%}\n"
-        f"<b>Bet:</b> {token_side} @ {price:.1%}\n"
-        f"<b>Amount:</b> ${size:.2f}\n"
-        f"<b>Algorithm:</b> {strategy}"
-        f"{edge_str}"
+        f"Bet: <b>{token_side}</b> @ {price_cents:.1f}¢\n"
+        f"Size: <b>${size:.2f}</b> ({size/price:.0f} shares)"
+        f"{edge_section}"
+        f"{exec_section}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"Strategy: {strategy}"
     )
 
     return get_alerter().send(message)

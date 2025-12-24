@@ -1,8 +1,6 @@
 """
 Stake calculation modes for backtesting.
 
-Ported from futarchy's backtesting infrastructure.
-
 Stake Modes:
 - fixed: Fixed stake amount per bet
 - fixed_pct: Fixed percentage of current capital

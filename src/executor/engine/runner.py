@@ -19,6 +19,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from collections import defaultdict
 
 import yaml
 from sqlalchemy.orm import Session
@@ -294,6 +295,8 @@ class ExecutorRunner:
             List of (Signal, SignalModel, TradeDecision) tuples for approved signals
         """
         approved = []
+        seen_pairs: set[tuple[str, int]] = set()
+        pending_by_strategy: defaultdict[str, int] = defaultdict(int)
 
         for signal in signals:
             # Create Signal database record
@@ -325,20 +328,47 @@ class ExecutorRunner:
                 executed=False,
             )
 
-            # Check risk limits
-            check = self.risk_manager.check_signal(signal, balance, db)
+            # Prevent duplicate signals per strategy/market in the same batch
+            key = (signal.strategy_name, signal.market_id)
+            duplicate_in_batch = key in seen_pairs
+            if not duplicate_in_batch:
+                seen_pairs.add(key)
 
-            if check.approved:
-                # Calculate size
+            # Check risk limits
+            check = self.risk_manager.check_signal(
+                signal,
+                balance,
+                db,
+                pending_positions=pending_by_strategy[signal.strategy_name],
+            )
+
+            if duplicate_in_batch:
+                signal_model.status = SignalStatus.REJECTED.value
+                signal_model.status_reason = (
+                    f"Duplicate signal for {signal.strategy_name} on market {signal.market_id}"
+                )
+                decision.rejected_reason = signal_model.status_reason
+                logger.debug(signal_model.status_reason)
+            elif check.approved:
+                # Calculate size using strategy's allocated capital for Kelly
+                # Get strategy balance from DB for proper Kelly sizing
+                from src.executor.models import StrategyBalance
+                strategy_balance_record = db.query(StrategyBalance).filter(
+                    StrategyBalance.strategy_name == signal.strategy_name
+                ).first()
+                strategy_capital = float(strategy_balance_record.allocated_usd) if strategy_balance_record else 400.0
+
                 size = self.position_sizer.calculate_size(
                     signal,
                     check.available_capital,
+                    strategy_capital=strategy_capital,
                 )
                 signal_model.suggested_size_usd = size
                 signal.size_usd = size
                 decision.signal_size_usd = size
                 signal_model.status = SignalStatus.APPROVED.value
                 approved.append((signal, signal_model, decision))
+                pending_by_strategy[signal.strategy_name] += 1
                 logger.info(
                     f"Signal approved: {signal.strategy_name} {signal.side.value if hasattr(signal.side, 'value') else signal.side} "
                     f"${size:.2f} - {signal.reason}"
@@ -375,6 +405,20 @@ class ExecutorRunner:
         """
         for signal, signal_model, decision in approved_signals:
             try:
+                # Final duplicate guard: skip if position already exists for this strategy/market
+                existing = self.position_manager.get_position_by_market(
+                    signal.market_id, db, strategy_name=signal.strategy_name
+                )
+                if existing is not None:
+                    msg = (
+                        f"Position already open for {signal.strategy_name} on market {signal.market_id}"
+                    )
+                    signal_model.status = SignalStatus.REJECTED.value
+                    signal_model.status_reason = msg
+                    decision.rejected_reason = msg
+                    logger.info(msg)
+                    continue
+
                 # Get real orderbook depth from market data
                 bid_depth, ask_depth = market_depth_map.get(
                     signal.market_id,
@@ -431,6 +475,18 @@ class ExecutorRunner:
                     else:
                         token_side = "YES"  # Default
 
+                    # Get expected win rate from strategy if available
+                    expected_win_rate = None
+                    for s in self.deployed_strategies:
+                        if s.name == signal.strategy_name:
+                            expected_win_rate = getattr(s, 'expected_no_rate', None)
+                            break
+
+                    # Get hours_to_close from decision_inputs
+                    hours_to_close = None
+                    if hasattr(signal, 'decision_inputs') and signal.decision_inputs:
+                        hours_to_close = signal.decision_inputs.get('hours_to_close')
+
                     alert_trade(
                         strategy=signal.strategy_name,
                         side=side_str,
@@ -440,6 +496,11 @@ class ExecutorRunner:
                         price=result.executed_price,
                         size=float(signal_model.suggested_size_usd or 0),
                         edge=signal.edge,
+                        expected_win_rate=expected_win_rate,
+                        order_type=execution_config.default_order_type.value,
+                        best_bid=signal.best_bid,
+                        best_ask=signal.best_ask,
+                        hours_to_close=hours_to_close,
                     )
                 else:
                     signal_model.status = SignalStatus.REJECTED.value
@@ -462,6 +523,10 @@ class ExecutorRunner:
         """
         Update current prices for open positions.
 
+        Correctly handles YES vs NO tokens:
+        - If position holds YES token, use YES price
+        - If position holds NO token, use 1 - YES price
+
         Also fetches prices for positions in closed (but not resolved) markets,
         which wouldn't be in the scanner results but still need price tracking.
 
@@ -473,38 +538,79 @@ class ExecutorRunner:
         from src.executor.models import Position, PositionStatus
         from sqlalchemy import desc
 
-        # Start with prices from scanned markets
-        price_updates = {m.id: m.price for m in markets}
+        # Build market info map: market_id -> (yes_price, yes_token_id, no_token_id)
+        market_info = {}
+        for m in markets:
+            market_info[m.id] = {
+                'yes_price': m.price,
+                'yes_token_id': m.yes_token_id,
+                'no_token_id': m.no_token_id,
+            }
 
-        # Find open positions in markets NOT in the scanned list
-        # These could be in closed (but not resolved) markets
-        scanned_market_ids = set(price_updates.keys())
+        # Find open positions
         open_positions = db.query(Position).filter(
             Position.is_paper == True,
             Position.status == PositionStatus.OPEN.value,
         ).all()
 
+        # Collect missing market IDs and fetch their info
         missing_market_ids = set()
         for pos in open_positions:
-            if pos.market_id not in scanned_market_ids:
+            if pos.market_id not in market_info:
                 missing_market_ids.add(pos.market_id)
 
-        # Fetch latest prices for missing markets from snapshots
+        # Fetch missing markets from database
         if missing_market_ids:
-            for market_id in missing_market_ids:
-                # Get most recent snapshot for this market
+            missing_markets = db.query(Market).filter(
+                Market.id.in_(missing_market_ids)
+            ).all()
+
+            for market in missing_markets:
+                # Get latest price from snapshot
                 latest_snapshot = db.query(Snapshot).filter(
-                    Snapshot.market_id == market_id,
+                    Snapshot.market_id == market.id,
                 ).order_by(desc(Snapshot.timestamp)).first()
 
                 if latest_snapshot and latest_snapshot.price:
-                    price_updates[market_id] = float(latest_snapshot.price)
+                    market_info[market.id] = {
+                        'yes_price': float(latest_snapshot.price),
+                        'yes_token_id': market.yes_token_id,
+                        'no_token_id': market.no_token_id,
+                    }
                     logger.debug(
-                        f"Updated price for closed market {market_id} from snapshot: "
+                        f"Updated price for closed market {market.id} from snapshot: "
                         f"${latest_snapshot.price:.4f}"
                     )
 
-        self.position_manager.update_prices(price_updates, db)
+        # Update each position with the correct token price
+        for position in open_positions:
+            if position.market_id not in market_info:
+                continue
+
+            info = market_info[position.market_id]
+            yes_price = info['yes_price']
+
+            # Determine if this position holds YES or NO tokens
+            if position.token_id == info['yes_token_id']:
+                current_price = yes_price
+            elif position.token_id == info['no_token_id']:
+                current_price = 1.0 - yes_price  # NO price = 1 - YES price
+            else:
+                # Token ID doesn't match either - shouldn't happen
+                logger.warning(
+                    f"Position {position.id} token_id doesn't match market tokens. "
+                    f"Using YES price as fallback."
+                )
+                current_price = yes_price
+
+            # Update position price and P&L
+            position.current_price = current_price
+            position.current_value = float(position.size_shares) * current_price
+            position.unrealized_pnl = position.current_value - float(position.cost_basis)
+            position.unrealized_pnl_pct = (
+                position.unrealized_pnl / float(position.cost_basis)
+                if position.cost_basis else 0
+            )
 
     def stop(self):
         """Stop the executor gracefully."""

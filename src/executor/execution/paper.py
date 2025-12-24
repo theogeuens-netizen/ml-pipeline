@@ -19,6 +19,7 @@ from src.executor.models import (
     Position,
     Signal,
     PaperBalance,
+    StrategyBalance,
     OrderStatus,
     PositionStatus,
 )
@@ -208,9 +209,30 @@ class PaperExecutor:
             db = get_session().__enter__()
 
         try:
+            # Safety: avoid duplicate positions for the same strategy/market
+            existing = db.query(Position).filter(
+                Position.is_paper == True,
+                Position.status == PositionStatus.OPEN.value,
+                Position.strategy_name == signal.strategy_name,
+                Position.market_id == signal.market_id,
+            ).first()
+            if existing:
+                return OrderResult(
+                    success=False,
+                    message=f"Position already open for {signal.strategy_name} on market {signal.market_id}",
+                )
+
             # Check balance
             balance = self.get_balance()
-            size_usd = float(signal.suggested_size_usd or 25.0)
+
+            # Prefer suggested size, then any size_usd attribute, then configured fixed amount
+            from src.executor.config import get_config
+            config = get_config()
+            fallback_size = config.sizing.fixed_amount_usd or 1.0
+            size_candidate = getattr(signal, "suggested_size_usd", None)
+            if size_candidate is None:
+                size_candidate = getattr(signal, "size_usd", None)
+            size_usd = float(size_candidate) if size_candidate is not None else float(fallback_size)
 
             if size_usd > balance:
                 return OrderResult(
@@ -284,8 +306,16 @@ class PaperExecutor:
             )
             trade.position_id = position.id
 
-            # Update balance
+            # Update global balance
             self._update_balance(db, -actual_usd)
+
+            # Update strategy-specific balance
+            self._update_strategy_balance(
+                db,
+                strategy_name=signal.strategy_name,
+                cost_delta=-actual_usd,
+                position_count_delta=1,
+            )
 
             # Update signal status
             signal.status = "executed"
@@ -390,6 +420,86 @@ class PaperExecutor:
             if total_value < float(balance.low_water_mark):
                 balance.low_water_mark = total_value
 
+    def _update_strategy_balance(
+        self,
+        db: Session,
+        strategy_name: str,
+        cost_delta: float = 0,
+        realized_pnl_delta: float = 0,
+        position_count_delta: int = 0,
+        trade_count_delta: int = 0,
+        win_delta: int = 0,
+        loss_delta: int = 0,
+    ):
+        """
+        Update strategy-specific balance tracking.
+
+        Args:
+            db: Database session
+            strategy_name: Strategy name
+            cost_delta: Change in current_usd (negative when buying)
+            realized_pnl_delta: Change in realized P&L (from closed positions)
+            position_count_delta: Change in open position count
+            trade_count_delta: Change in total trade count
+            win_delta: Number of winning trades to add
+            loss_delta: Number of losing trades to add
+        """
+        balance = db.query(StrategyBalance).filter(
+            StrategyBalance.strategy_name == strategy_name
+        ).first()
+
+        if balance is None:
+            # Create balance record with default $400 allocation
+            balance = StrategyBalance(
+                strategy_name=strategy_name,
+                allocated_usd=400.0,
+                current_usd=400.0,
+            )
+            db.add(balance)
+            db.flush()
+
+        # Update balance fields
+        balance.current_usd = float(balance.current_usd) + cost_delta
+        balance.realized_pnl = float(balance.realized_pnl) + realized_pnl_delta
+        balance.position_count = balance.position_count + position_count_delta
+        balance.trade_count = balance.trade_count + trade_count_delta
+        balance.win_count = balance.win_count + win_delta
+        balance.loss_count = balance.loss_count + loss_delta
+
+        # Calculate total P&L (realized + unrealized)
+        # Get unrealized P&L from open positions
+        open_positions = db.query(Position).filter(
+            Position.is_paper == True,
+            Position.strategy_name == strategy_name,
+            Position.status == PositionStatus.OPEN.value,
+        ).all()
+        unrealized = sum(float(p.unrealized_pnl or 0) for p in open_positions)
+        balance.unrealized_pnl = unrealized
+        balance.total_pnl = float(balance.realized_pnl) + unrealized
+
+        # Total value = current_usd (cash) + value of open positions
+        position_value = sum(float(p.current_value or p.cost_basis) for p in open_positions)
+        total_value = float(balance.current_usd) + position_value
+
+        # Update high/low water marks
+        if total_value > float(balance.high_water_mark):
+            balance.high_water_mark = total_value
+        if total_value < float(balance.low_water_mark):
+            balance.low_water_mark = total_value
+
+        # Update max drawdown
+        if float(balance.high_water_mark) > 0:
+            drawdown_usd = float(balance.high_water_mark) - total_value
+            drawdown_pct = drawdown_usd / float(balance.high_water_mark)
+            if drawdown_usd > float(balance.max_drawdown_usd):
+                balance.max_drawdown_usd = drawdown_usd
+                balance.max_drawdown_pct = drawdown_pct
+
+        logger.debug(
+            f"Strategy {strategy_name} balance: ${balance.current_usd:.2f} "
+            f"(realized: ${balance.realized_pnl:+.2f}, unrealized: ${unrealized:+.2f})"
+        )
+
     def close_position(
         self,
         position_id: int,
@@ -440,11 +550,46 @@ class PaperExecutor:
             # Return funds to balance
             self._update_balance(db, exit_value)
 
+            # Update strategy balance
+            self._update_strategy_balance(
+                db,
+                strategy_name=position.strategy_name,
+                cost_delta=exit_value,  # Return funds
+                realized_pnl_delta=pnl,
+                position_count_delta=-1,
+                trade_count_delta=1,
+                win_delta=1 if pnl > 0 else 0,
+                loss_delta=1 if pnl < 0 else 0,
+            )
+
+            # Get market info for Telegram alert
+            from src.db.models import Market
+            market = db.query(Market).filter(Market.id == position.market_id).first()
+            market_title = market.question if market else f"Market {position.market_id}"
+            is_yes = (position.token_id == market.yes_token_id) if market else True
+            token_side = "YES" if is_yes else "NO"
+
             db.commit()
 
             logger.info(
                 f"Paper position closed: {position_id} @ ${exit_price:.4f}, P&L: ${pnl:.2f}"
             )
+
+            # Send Telegram alert
+            try:
+                from src.alerts.telegram import alert_position_closed
+                alert_position_closed(
+                    strategy=position.strategy_name,
+                    market=market_title,
+                    side=token_side,
+                    outcome=reason.upper() if reason in ("yes", "no") else "MANUAL",
+                    cost_basis=float(position.cost_basis),
+                    payout=exit_value,
+                    pnl=pnl,
+                    market_id=position.market_id,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send Telegram alert: {e}")
 
             return OrderResult(
                 success=True,

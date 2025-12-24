@@ -1,0 +1,68 @@
+experiment_id: exp-003
+created_at: 2024-12-23T14:30:00Z
+
+backtest:
+  initial_capital: 1000
+  stake_mode: fixed
+  stake_per_bet: 10
+  cost_per_bet: 0.0
+  max_position_pct: 0.25
+
+data_source:
+  database: futarchy
+  host: localhost
+  port: 5434
+  user: futarchy
+  password: futarchy
+  tables:
+    markets: markets
+    snapshots: price_snapshots
+
+filters:
+  categories: all
+  min_snapshots: 20
+  price_range:
+    min: 0.10
+    max: 0.90
+  hours_to_expiry:
+    min: 24
+    max: null
+
+strategy:
+  type: mean_reversion
+  rolling_window_hours: 24
+  side: fade  # Bet opposite to spike direction
+
+variants:
+  - id: v1
+    price_std_threshold: 2.0
+    holding_period_hours: 1
+  - id: v2
+    price_std_threshold: 2.0
+    holding_period_hours: 4
+  - id: v3
+    price_std_threshold: 2.0
+    holding_period_hours: 8
+  - id: v4
+    price_std_threshold: 2.5
+    holding_period_hours: 1
+  - id: v5
+    price_std_threshold: 2.5
+    holding_period_hours: 4
+  - id: v6
+    price_std_threshold: 2.5
+    holding_period_hours: 8
+  - id: v7
+    price_std_threshold: 3.0
+    holding_period_hours: 1
+  - id: v8
+    price_std_threshold: 3.0
+    holding_period_hours: 4
+  - id: v9
+    price_std_threshold: 3.0
+    holding_period_hours: 8
+
+robustness:
+  time_split: true
+  category_split: false  # Using all categories
+  liquidity_split: true

@@ -58,6 +58,7 @@ class RiskManager:
         signal: Signal,
         balance: float,
         db: Optional[Session] = None,
+        pending_positions: int = 0,
     ) -> RiskCheckResult:
         """
         Check if a signal passes all risk checks.
@@ -66,6 +67,7 @@ class RiskManager:
             signal: Signal to check
             balance: Available balance
             db: Optional database session
+            pending_positions: Number of positions already approved this cycle for this strategy
 
         Returns:
             RiskCheckResult with approval status and details
@@ -106,23 +108,46 @@ class RiskManager:
             if should_close:
                 check_db.close()
 
-        # Check 1: Position count limit
+        # Get strategy name for isolated checks
+        strategy_name = getattr(signal, 'strategy_name', None)
+
+        # Check 1: Position count limit (per-strategy first, fall back to global)
+        per_strategy_limit = getattr(risk, "max_positions_per_strategy", None)
+        if strategy_name and per_strategy_limit:
+            position_count = self.position_manager.get_position_count(
+                db, strategy_name=strategy_name
+            ) + pending_positions
+            if position_count >= per_strategy_limit:
+                return RiskCheckResult(
+                    approved=False,
+                    reason=(
+                        f"Max positions reached for {strategy_name} "
+                        f"({position_count}/{per_strategy_limit})"
+                    ),
+                )
+
         position_count = self.position_manager.get_position_count(db)
-        if position_count >= risk.max_positions:
+        if risk.max_positions and position_count >= risk.max_positions:
             return RiskCheckResult(
                 approved=False,
-                reason=f"Max positions reached ({position_count}/{risk.max_positions})",
+                reason=(
+                    f"Max positions reached ({position_count}/{risk.max_positions})"
+                ),
             )
 
-        # Check 2: Already have position in this market
-        existing = self.position_manager.get_position_by_market(signal.market_id, db)
+        # Check 2: Already have position in this market FOR THIS STRATEGY
+        # Strategy isolation: each strategy can independently hold positions
+        # Only block if the SAME strategy already has a position in this market
+        existing = self.position_manager.get_position_by_market(
+            signal.market_id, db, strategy_name=strategy_name
+        )
         if existing is not None:
             return RiskCheckResult(
                 approved=False,
-                reason=f"Already have position in market {signal.market_id}",
+                reason=f"Strategy {strategy_name} already has position in market {signal.market_id}",
             )
 
-        # Check 3: Total exposure limit
+        # Check 3: Total exposure limit (global)
         current_exposure = self.position_manager.get_total_exposure(db)
         max_exposure = risk.max_total_exposure_usd
         available_for_new = max_exposure - current_exposure
@@ -133,11 +158,14 @@ class RiskManager:
                 reason=f"Max exposure reached (${current_exposure:.2f}/${max_exposure:.2f})",
             )
 
-        # Check 4: Balance check
-        if balance <= 0:
+        # Check 4: Balance check (use strategy balance if available)
+        strategy_balance = self._get_strategy_balance(strategy_name, db)
+        effective_balance = strategy_balance if strategy_balance is not None else balance
+
+        if effective_balance <= 0:
             return RiskCheckResult(
                 approved=False,
-                reason="Insufficient balance",
+                reason=f"Insufficient balance for {strategy_name}: ${effective_balance:.2f}",
             )
 
         # Check 5: Drawdown check
@@ -148,8 +176,9 @@ class RiskManager:
             )
 
         # Calculate available capital for this signal
+        # Use strategy-specific balance if available
         max_position = risk.max_position_usd
-        available_capital = min(balance, available_for_new, max_position)
+        available_capital = min(effective_balance, available_for_new, max_position)
 
         # Support both old and new Signal attribute names
         signal_size = getattr(signal, 'size_usd', None) or getattr(signal, 'suggested_size_usd', None)
@@ -164,6 +193,47 @@ class RiskManager:
             available_capital=available_capital,
             suggested_size=suggested_size,
         )
+
+    def _get_strategy_balance(
+        self,
+        strategy_name: Optional[str],
+        db: Optional[Session] = None,
+    ) -> Optional[float]:
+        """
+        Get available balance for a specific strategy.
+
+        Args:
+            strategy_name: Strategy name
+            db: Optional database session
+
+        Returns:
+            Available USD balance for the strategy, or None if not found
+        """
+        if not strategy_name:
+            return None
+
+        from src.executor.models import StrategyBalance
+        from src.db.database import get_session
+
+        close_db = db is None
+        if db is None:
+            db = get_session().__enter__()
+
+        try:
+            balance = db.query(StrategyBalance).filter(
+                StrategyBalance.strategy_name == strategy_name
+            ).first()
+
+            if balance is None:
+                # Strategy doesn't have a balance record yet
+                # Return default allocation
+                return 400.0
+
+            return float(balance.current_usd)
+
+        finally:
+            if close_db:
+                db.close()
 
     def _check_drawdown(self) -> bool:
         """
@@ -288,6 +358,7 @@ class RiskManager:
         return {
             "max_position_usd": risk.max_position_usd,
             "max_total_exposure_usd": risk.max_total_exposure_usd,
+            "max_positions_per_strategy": getattr(risk, "max_positions_per_strategy", None),
             "max_positions": risk.max_positions,
             "max_drawdown_pct": risk.max_drawdown_pct,
             "current_balance": balance,

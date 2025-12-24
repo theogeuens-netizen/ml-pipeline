@@ -3,8 +3,6 @@ Backtesting engine for polymarket-ml strategies.
 
 This package provides P&L simulation capabilities using historical data
 from the historical_markets and historical_price_snapshots tables.
-
-Ported from futarchy's backtesting infrastructure.
 """
 
 from .metrics import (
@@ -34,6 +32,17 @@ from .data import (
     generate_bets_from_snapshots,
     get_historical_stats,
 )
+from .robustness import (
+    SplitMetrics,
+    SplitResult,
+    CategorySplitResult,
+    RobustnessResult,
+    time_split_backtest,
+    liquidity_split_backtest,
+    category_split_backtest,
+    run_all_robustness_checks,
+    format_robustness_results,
+)
 
 __all__ = [
     # Metrics
@@ -59,4 +68,14 @@ __all__ = [
     "load_price_snapshots",
     "generate_bets_from_snapshots",
     "get_historical_stats",
+    # Robustness
+    "SplitMetrics",
+    "SplitResult",
+    "CategorySplitResult",
+    "RobustnessResult",
+    "time_split_backtest",
+    "liquidity_split_backtest",
+    "category_split_backtest",
+    "run_all_robustness_checks",
+    "format_robustness_results",
 ]

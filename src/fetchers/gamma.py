@@ -437,6 +437,63 @@ class SyncGammaClient(SyncBaseClient):
             )
             return None
 
+    def get_market_by_slug(self, slug: str) -> Optional[dict[str, Any]]:
+        """
+        Fetch a single market by slug.
+
+        More reliable than condition_id lookup for resolved/closed markets.
+
+        Args:
+            slug: The market's slug
+
+        Returns:
+            Market dictionary or None if not found
+        """
+        try:
+            markets = self.get("/markets", {"slug": slug})
+            if markets and len(markets) > 0:
+                return markets[0]
+            return None
+        except Exception as e:
+            logger.warning("Failed to fetch market by slug", slug=slug, error=str(e))
+            return None
+
+    def get_market_by_id(self, gamma_id: int) -> Optional[dict[str, Any]]:
+        """
+        Fetch a single market by Gamma API numeric ID.
+
+        More reliable than condition_id lookup for resolved/closed markets.
+
+        Args:
+            gamma_id: The market's Gamma API numeric ID (e.g., 978832)
+
+        Returns:
+            Market dictionary or None if not found
+        """
+        try:
+            return self.get(f"/markets/{gamma_id}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (404, 422):
+                logger.debug(
+                    "Market not available by ID",
+                    gamma_id=gamma_id,
+                    status=e.response.status_code,
+                )
+                return None
+            logger.warning(
+                "Failed to fetch market by ID",
+                gamma_id=gamma_id,
+                status=e.response.status_code,
+            )
+            return None
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch market by ID",
+                gamma_id=gamma_id,
+                error=str(e),
+            )
+            return None
+
     def get_closed_markets(self, limit: int = 500, days_back: int = 7) -> list[dict[str, Any]]:
         """
         Fetch recently closed markets to capture resolution data.

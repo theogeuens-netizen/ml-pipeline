@@ -1,0 +1,676 @@
+{
+  "experiment_id": "exp-003",
+  "run_at": "2025-12-23T13:59:44.811170Z",
+  "data_range": {
+    "start": "2024-06-22",
+    "end": "2024-12-08",
+    "markets_tested": 81753,
+    "resolved_markets": 81753
+  },
+  "variants": [
+    {
+      "id": "v1",
+      "params": {
+        "price_std_threshold": 2.0,
+        "holding_period_hours": 1
+      },
+      "metrics": {
+        "sharpe": 6.22,
+        "win_rate": 0.526,
+        "profit_factor": 5.59,
+        "total_trades": 4478,
+        "total_pnl": 30794.66,
+        "max_drawdown_pct": 24.59
+      },
+      "robustness": {
+        "time_split": {
+          "first_half": {
+            "sharpe": 6.46,
+            "win_rate": 0.523,
+            "trades": 2239,
+            "pnl": 15845.0
+          },
+          "second_half": {
+            "sharpe": 5.98,
+            "win_rate": 0.529,
+            "trades": 2239,
+            "pnl": 14949.66
+          },
+          "pass": true
+        },
+        "liquidity_split": {
+          "low_liquidity": {
+            "sharpe": 5.83,
+            "win_rate": 0.498,
+            "trades": 2239,
+            "pnl": 13232.09
+          },
+          "high_liquidity": {
+            "sharpe": 6.6,
+            "win_rate": 0.553,
+            "trades": 2239,
+            "pnl": 17562.57
+          },
+          "pass": true
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.22,
+          "pass": "True"
+        },
+        "win_rate": {
+          "threshold": 0.51,
+          "actual": 0.526,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 50,
+          "actual": 4478,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.1,
+          "actual": 5.59,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "all_pass": true
+    },
+    {
+      "id": "v2",
+      "params": {
+        "price_std_threshold": 2.0,
+        "holding_period_hours": 4
+      },
+      "metrics": {
+        "sharpe": 6.02,
+        "win_rate": 0.565,
+        "profit_factor": 3.89,
+        "total_trades": 4478,
+        "total_pnl": 33189.85,
+        "max_drawdown_pct": 28.17
+      },
+      "robustness": {
+        "time_split": {
+          "first_half": {
+            "sharpe": 6.27,
+            "win_rate": 0.578,
+            "trades": 2239,
+            "pnl": 17188.08
+          },
+          "second_half": {
+            "sharpe": 5.77,
+            "win_rate": 0.552,
+            "trades": 2239,
+            "pnl": 16001.77
+          },
+          "pass": true
+        },
+        "liquidity_split": {
+          "low_liquidity": {
+            "sharpe": 5.77,
+            "win_rate": 0.584,
+            "trades": 2239,
+            "pnl": 14022.09
+          },
+          "high_liquidity": {
+            "sharpe": 6.3,
+            "win_rate": 0.547,
+            "trades": 2239,
+            "pnl": 19167.76
+          },
+          "pass": true
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.02,
+          "pass": "True"
+        },
+        "win_rate": {
+          "threshold": 0.51,
+          "actual": 0.565,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 50,
+          "actual": 4478,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.1,
+          "actual": 3.89,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "all_pass": true
+    },
+    {
+      "id": "v3",
+      "params": {
+        "price_std_threshold": 2.0,
+        "holding_period_hours": 8
+      },
+      "metrics": {
+        "sharpe": 5.36,
+        "win_rate": 0.54,
+        "profit_factor": 2.97,
+        "total_trades": 4478,
+        "total_pnl": 31671.33,
+        "max_drawdown_pct": 30.55
+      },
+      "robustness": {
+        "time_split": {
+          "first_half": {
+            "sharpe": 5.56,
+            "win_rate": 0.553,
+            "trades": 2239,
+            "pnl": 16256.27
+          },
+          "second_half": {
+            "sharpe": 5.16,
+            "win_rate": 0.527,
+            "trades": 2239,
+            "pnl": 15415.05
+          },
+          "pass": true
+        },
+        "liquidity_split": {
+          "low_liquidity": {
+            "sharpe": 4.55,
+            "win_rate": 0.556,
+            "trades": 2239,
+            "pnl": 11465.03
+          },
+          "high_liquidity": {
+            "sharpe": 6.1,
+            "win_rate": 0.525,
+            "trades": 2239,
+            "pnl": 20206.3
+          },
+          "pass": true
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 5.36,
+          "pass": "True"
+        },
+        "win_rate": {
+          "threshold": 0.51,
+          "actual": 0.54,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 50,
+          "actual": 4478,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.1,
+          "actual": 2.97,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "all_pass": true
+    },
+    {
+      "id": "v4",
+      "params": {
+        "price_std_threshold": 2.5,
+        "holding_period_hours": 1
+      },
+      "metrics": {
+        "sharpe": 6.44,
+        "win_rate": 0.531,
+        "profit_factor": 5.61,
+        "total_trades": 2831,
+        "total_pnl": 20743.43,
+        "max_drawdown_pct": 24.56
+      },
+      "robustness": {
+        "time_split": {
+          "first_half": {
+            "sharpe": 7.08,
+            "win_rate": 0.534,
+            "trades": 1415,
+            "pnl": 11798.52
+          },
+          "second_half": {
+            "sharpe": 5.78,
+            "win_rate": 0.528,
+            "trades": 1416,
+            "pnl": 8944.91
+          },
+          "pass": true
+        },
+        "liquidity_split": {
+          "low_liquidity": {
+            "sharpe": 5.94,
+            "win_rate": 0.506,
+            "trades": 1415,
+            "pnl": 8641.31
+          },
+          "high_liquidity": {
+            "sharpe": 6.93,
+            "win_rate": 0.556,
+            "trades": 1416,
+            "pnl": 12102.13
+          },
+          "pass": true
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.44,
+          "pass": "True"
+        },
+        "win_rate": {
+          "threshold": 0.51,
+          "actual": 0.531,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 50,
+          "actual": 2831,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.1,
+          "actual": 5.61,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "all_pass": true
+    },
+    {
+      "id": "v5",
+      "params": {
+        "price_std_threshold": 2.5,
+        "holding_period_hours": 4
+      },
+      "metrics": {
+        "sharpe": 6.31,
+        "win_rate": 0.559,
+        "profit_factor": 4.0,
+        "total_trades": 2831,
+        "total_pnl": 22970.73,
+        "max_drawdown_pct": 28.17
+      },
+      "robustness": {
+        "time_split": {
+          "first_half": {
+            "sharpe": 6.91,
+            "win_rate": 0.572,
+            "trades": 1415,
+            "pnl": 12975.58
+          },
+          "second_half": {
+            "sharpe": 5.69,
+            "win_rate": 0.545,
+            "trades": 1416,
+            "pnl": 9995.14
+          },
+          "pass": true
+        },
+        "liquidity_split": {
+          "low_liquidity": {
+            "sharpe": 5.84,
+            "win_rate": 0.563,
+            "trades": 1415,
+            "pnl": 9425.49
+          },
+          "high_liquidity": {
+            "sharpe": 6.77,
+            "win_rate": 0.555,
+            "trades": 1416,
+            "pnl": 13545.24
+          },
+          "pass": true
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.31,
+          "pass": "True"
+        },
+        "win_rate": {
+          "threshold": 0.51,
+          "actual": 0.559,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 50,
+          "actual": 2831,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.1,
+          "actual": 4.0,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "all_pass": true
+    },
+    {
+      "id": "v6",
+      "params": {
+        "price_std_threshold": 2.5,
+        "holding_period_hours": 8
+      },
+      "metrics": {
+        "sharpe": 5.86,
+        "win_rate": 0.547,
+        "profit_factor": 3.24,
+        "total_trades": 2831,
+        "total_pnl": 22718.02,
+        "max_drawdown_pct": 30.55
+      },
+      "robustness": {
+        "time_split": {
+          "first_half": {
+            "sharpe": 6.27,
+            "win_rate": 0.553,
+            "trades": 1415,
+            "pnl": 12503.17
+          },
+          "second_half": {
+            "sharpe": 5.43,
+            "win_rate": 0.541,
+            "trades": 1416,
+            "pnl": 10214.85
+          },
+          "pass": true
+        },
+        "liquidity_split": {
+          "low_liquidity": {
+            "sharpe": 5.14,
+            "win_rate": 0.562,
+            "trades": 1415,
+            "pnl": 8545.04
+          },
+          "high_liquidity": {
+            "sharpe": 6.54,
+            "win_rate": 0.532,
+            "trades": 1416,
+            "pnl": 14172.98
+          },
+          "pass": true
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 5.86,
+          "pass": "True"
+        },
+        "win_rate": {
+          "threshold": 0.51,
+          "actual": 0.547,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 50,
+          "actual": 2831,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.1,
+          "actual": 3.24,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "all_pass": true
+    },
+    {
+      "id": "v7",
+      "params": {
+        "price_std_threshold": 3.0,
+        "holding_period_hours": 1
+      },
+      "metrics": {
+        "sharpe": 6.84,
+        "win_rate": 0.539,
+        "profit_factor": 5.71,
+        "total_trades": 1974,
+        "total_pnl": 16105.34,
+        "max_drawdown_pct": 24.56
+      },
+      "robustness": {
+        "time_split": {
+          "first_half": {
+            "sharpe": 7.73,
+            "win_rate": 0.558,
+            "trades": 987,
+            "pnl": 9428.94
+          },
+          "second_half": {
+            "sharpe": 5.94,
+            "win_rate": 0.519,
+            "trades": 987,
+            "pnl": 6676.4
+          },
+          "pass": true
+        },
+        "liquidity_split": {
+          "low_liquidity": {
+            "sharpe": 6.24,
+            "win_rate": 0.515,
+            "trades": 987,
+            "pnl": 6853.85
+          },
+          "high_liquidity": {
+            "sharpe": 7.43,
+            "win_rate": 0.562,
+            "trades": 987,
+            "pnl": 9251.5
+          },
+          "pass": true
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.84,
+          "pass": "True"
+        },
+        "win_rate": {
+          "threshold": 0.51,
+          "actual": 0.539,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 50,
+          "actual": 1974,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.1,
+          "actual": 5.71,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "all_pass": true
+    },
+    {
+      "id": "v8",
+      "params": {
+        "price_std_threshold": 3.0,
+        "holding_period_hours": 4
+      },
+      "metrics": {
+        "sharpe": 6.8,
+        "win_rate": 0.558,
+        "profit_factor": 4.28,
+        "total_trades": 1974,
+        "total_pnl": 18166.34,
+        "max_drawdown_pct": 24.38
+      },
+      "robustness": {
+        "time_split": {
+          "first_half": {
+            "sharpe": 7.47,
+            "win_rate": 0.571,
+            "trades": 987,
+            "pnl": 10266.86
+          },
+          "second_half": {
+            "sharpe": 6.11,
+            "win_rate": 0.545,
+            "trades": 987,
+            "pnl": 7899.48
+          },
+          "pass": true
+        },
+        "liquidity_split": {
+          "low_liquidity": {
+            "sharpe": 6.27,
+            "win_rate": 0.558,
+            "trades": 987,
+            "pnl": 7584.32
+          },
+          "high_liquidity": {
+            "sharpe": 7.32,
+            "win_rate": 0.558,
+            "trades": 987,
+            "pnl": 10582.03
+          },
+          "pass": true
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.8,
+          "pass": "True"
+        },
+        "win_rate": {
+          "threshold": 0.51,
+          "actual": 0.558,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 50,
+          "actual": 1974,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.1,
+          "actual": 4.28,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "all_pass": true
+    },
+    {
+      "id": "v9",
+      "params": {
+        "price_std_threshold": 3.0,
+        "holding_period_hours": 8
+      },
+      "metrics": {
+        "sharpe": 6.08,
+        "win_rate": 0.522,
+        "profit_factor": 3.32,
+        "total_trades": 1974,
+        "total_pnl": 17306.07,
+        "max_drawdown_pct": 26.86
+      },
+      "robustness": {
+        "time_split": {
+          "first_half": {
+            "sharpe": 6.62,
+            "win_rate": 0.524,
+            "trades": 987,
+            "pnl": 9718.47
+          },
+          "second_half": {
+            "sharpe": 5.52,
+            "win_rate": 0.52,
+            "trades": 987,
+            "pnl": 7587.6
+          },
+          "pass": true
+        },
+        "liquidity_split": {
+          "low_liquidity": {
+            "sharpe": 5.39,
+            "win_rate": 0.522,
+            "trades": 987,
+            "pnl": 6773.64
+          },
+          "high_liquidity": {
+            "sharpe": 6.73,
+            "win_rate": 0.522,
+            "trades": 987,
+            "pnl": 10532.43
+          },
+          "pass": true
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.08,
+          "pass": "True"
+        },
+        "win_rate": {
+          "threshold": 0.51,
+          "actual": 0.522,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 50,
+          "actual": 1974,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.1,
+          "actual": 3.32,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "all_pass": true
+    }
+  ],
+  "best_variant": "v7",
+  "summary": {
+    "all_passed_kill_criteria": true,
+    "robustness_pass_rate": 1.0,
+    "variants_passed": 9,
+    "variants_total": 9
+  }
+}

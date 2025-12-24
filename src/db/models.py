@@ -45,6 +45,7 @@ class Market(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     condition_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    gamma_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)  # Gamma API numeric ID
     slug: Mapped[str] = mapped_column(String(255))
     question: Mapped[str] = mapped_column(Text)
     description: Mapped[Optional[str]] = mapped_column(Text)
@@ -412,15 +413,14 @@ class RuleValidation(Base):
 # ============================================================================
 # HISTORICAL DATA MODELS (for backtesting)
 # ============================================================================
-# These tables contain migrated data from futarchy's PostgreSQL database.
-# They are separate from polymarket-ml's operational data and are used
+# These tables are separate from polymarket-ml's operational data and are used
 # only for backtesting, not for XGBoost training.
 # ============================================================================
 
 
 class HistoricalMarket(Base):
     """
-    Historical market data from futarchy (for backtesting).
+    Historical market data for backtesting.
 
     This is separate from the 'markets' table which contains
     polymarket-ml's high-granularity operational data.
@@ -459,7 +459,7 @@ class HistoricalMarket(Base):
 
 class HistoricalPriceSnapshot(Base):
     """
-    Historical price snapshot from futarchy (for backtesting).
+    Historical price snapshot for backtesting.
 
     This is separate from the 'snapshots' table which contains
     polymarket-ml's high-granularity feature data.

@@ -243,8 +243,6 @@ def main():
         if not markets:
             print("\nNo resolved markets found in date range.")
             print("Run 'python -m cli.backtest --stats' to see available data.")
-            print("\nNote: Historical data must be migrated from futarchy first.")
-            print("Run 'python scripts/migrate_futarchy_data.py' to import data.")
             sys.exit(0)
 
         print(f"Found {len(markets):,} resolved markets")

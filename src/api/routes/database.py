@@ -106,9 +106,11 @@ async def browse_table(
     # Get total count
     total = db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar()
 
-    # Get paginated data
+    # Get paginated data - explicitly select columns in model order
+    # (SELECT * returns columns in physical DB order which may differ from model order)
+    columns_str = ", ".join(columns)
     query = text(f"""
-        SELECT * FROM {table_name}
+        SELECT {columns_str} FROM {table_name}
         ORDER BY {order_by} {order.upper()}
         LIMIT :limit OFFSET :offset
     """)

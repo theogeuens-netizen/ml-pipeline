@@ -77,8 +77,9 @@ def get_default_config() -> ExecutorConfig:
         ),
         risk=RiskConfig(
             max_position_usd=100.0,
-            max_total_exposure_usd=1000.0,
-            max_positions=20,
+            max_total_exposure_usd=0.0,  # 0 = disable global exposure cap
+            max_positions=0,  # 0 = no global cap by default
+            max_positions_per_strategy=40,
             max_drawdown_pct=0.15,
         ),
         execution=ExecutionConfig(

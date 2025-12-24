@@ -22,6 +22,8 @@ Commands:
   adjust          Change strategy parameters or risk settings
   backtest        Test a strategy against historical data
   logs            Show recent errors or activity
+  research        Show recent experiments from Research Lab
+  ship <exp_id>   Deploy a shipped experiment to strategies.yaml
   advise          Switch to proactive advisor mode
 
 Ready for action. What would you like to do?
@@ -369,6 +371,108 @@ python3 -m cli.debug --funnel
 
 ---
 
+### `research` - View Research Lab Experiments
+
+Show recent experiments from the Strategy Research Lab.
+
+**Commands:**
+```bash
+# Show ledger stats
+python3 -m cli.ledger stats
+
+# Show recent experiments
+python3 -m cli.ledger recent 10
+
+# Search by friction bucket
+python3 -m cli.ledger search timing
+python3 -m cli.ledger search --status ship
+```
+
+**Display format:**
+```
+=== RESEARCH LAB ===
+
+LEDGER STATS:
+  Total experiments: 15
+  Shipped: 3 (20%)
+  Killed: 10 (67%)
+  Iterating: 2 (13%)
+
+RECENT EXPERIMENTS:
+  [+] exp-015 (timing): ESPORTS NO 1-4h edge... [SHIP]
+  [x] exp-014 (liquidity): Thin market fade... [KILL]
+  [~] exp-013 (behavioral): Weekend bias... [ITERATE]
+
+SHIPPED (ready to deploy):
+  exp-015: esports_no_4h (Sharpe=0.95, WR=62%)
+  exp-008: crypto_momentum (Sharpe=0.72, WR=55%)
+```
+
+**To deploy a shipped experiment:** `ship <exp_id>`
+
+---
+
+### `ship <exp_id>` - Deploy Experiment to Production
+
+Deploy a shipped experiment from Research Lab to `strategies.yaml`.
+
+**Prerequisites:**
+- `experiments/<exp_id>/verdict.md` must exist with `Decision: SHIP`
+- Experiment must have passed all kill criteria
+
+**Process:**
+1. Read experiment files (spec.md, results.json, verdict.md)
+2. Extract best variant parameters
+3. Generate YAML entry for `strategies.yaml`
+4. Show preview and confirm
+5. Append to `strategies.yaml`
+6. Executor auto-reloads within 30 seconds
+
+**Example:**
+```
+> ship exp-015
+
+=== DEPLOYING exp-015 ===
+
+Experiment: exp-015
+Hypothesis: ESPORTS NO in 1-4h window has 5-10% edge
+Friction: timing
+Verdict: SHIP
+
+Best Variant: v3
+  Sharpe: 0.95
+  Win Rate: 62%
+  Trades: 67
+  Profit Factor: 1.45
+
+Will add to strategies.yaml:
+
+  no_bias:
+    - name: esports_no_4h          # from exp-015
+      category: ESPORTS
+      historical_no_rate: 0.75
+      min_hours: 1
+      max_hours: 4
+      min_liquidity: 1000
+      # Experiment: exp-015
+      # Shipped: 2024-12-21
+
+Confirm deploy? [y/N]
+```
+
+**Files to read:**
+- `experiments/<exp_id>/spec.md` - Universe filter, parameters
+- `experiments/<exp_id>/results.json` - Best variant, metrics
+- `experiments/<exp_id>/verdict.md` - Confirm SHIP status
+
+**After deployment:**
+- Executor auto-reloads `strategies.yaml`
+- Strategy appears in `strategies` command
+- Paper trading begins on next scan cycle
+- Use `debug <name>` to monitor
+
+---
+
 ## MarketData Fields Available
 
 | Field | Type | Description |
@@ -458,6 +562,10 @@ WHERE trade_count = 0 AND current_usd = allocated_usd;"
 | `config.yaml` | Risk, sizing, execution settings |
 | `cli/debug.py` | CLI debug tool |
 | `cli/deploy.py` | List/validate strategies |
+| `experiments/` | Research Lab experiment files |
+| `ledger/insights.jsonl` | Accumulated research learnings |
+| `cli/ledger.py` | Ledger query tool |
+| `RESEARCH_LAB.md` | Research Lab full reference |
 
 ---
 
@@ -484,3 +592,7 @@ WHERE trade_count = 0 AND current_usd = allocated_usd;"
 | "why isn't X trading?" | Run `python3 -m cli.debug <strategy_name>` |
 | "show leaderboard" | Query strategy_balances ordered by total_pnl |
 | "reset paper balance" | Reset `paper_balances` and `strategy_balances` tables |
+| "show research" | Run `python3 -m cli.ledger stats` + `recent 10` |
+| "deploy experiment X" | Read exp files, generate YAML, append to strategies.yaml |
+| "what experiments shipped?" | Run `python3 -m cli.ledger search --status ship` |
+| "test a new idea" | Use `/hypothesis <friction_bucket>` |

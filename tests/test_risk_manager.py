@@ -32,6 +32,7 @@ class MockRiskConfig:
     """Mock risk config for testing."""
     max_position_usd: float = 100.0
     max_total_exposure_usd: float = 10000.0
+    max_positions_per_strategy: int = 20
     max_positions: int = 500
     max_drawdown_pct: float = 0.20
 
@@ -91,7 +92,10 @@ class TestPositionCountLimit:
 
     def test_at_limit_rejected(self):
         """Signal should be rejected when at position limit."""
-        config = MockConfig(risk=MockRiskConfig(max_positions=100))
+        config = MockConfig(risk=MockRiskConfig(
+            max_positions=100,
+            max_positions_per_strategy=1000,
+        ))
         manager = RiskManager(config=config)
 
         # Mock position manager to return count at limit
@@ -105,7 +109,10 @@ class TestPositionCountLimit:
 
     def test_over_limit_rejected(self):
         """Signal should be rejected when over position limit."""
-        config = MockConfig(risk=MockRiskConfig(max_positions=50))
+        config = MockConfig(risk=MockRiskConfig(
+            max_positions=50,
+            max_positions_per_strategy=1000,
+        ))
         manager = RiskManager(config=config)
 
         # Mock position manager to return count over limit
@@ -116,6 +123,25 @@ class TestPositionCountLimit:
 
         assert result.approved is False
         assert "Max positions" in result.reason
+
+    def test_per_strategy_limit_with_pending(self):
+        """Pending approvals in the same cycle should count toward the strategy cap."""
+        config = MockConfig(risk=MockRiskConfig(max_positions_per_strategy=2))
+        manager = RiskManager(config=config)
+
+        # One live position, one already approved earlier in batch
+        manager.position_manager.get_position_count = Mock(return_value=1)
+        manager.position_manager.get_position_by_market = Mock(return_value=None)
+
+        signal = MockSignal(strategy_name="alpha")
+        result = manager.check_signal(
+            signal,
+            balance=1000.0,
+            pending_positions=1,
+        )
+
+        assert result.approved is False
+        assert "Max positions reached for alpha" in result.reason
 
 
 class TestDuplicatePositionCheck:
@@ -149,7 +175,7 @@ class TestDuplicatePositionCheck:
         result = manager.check_signal(signal, balance=1000.0)
 
         assert result.approved is False
-        assert "Already have position" in result.reason
+        assert "already has position" in result.reason
 
 
 class TestExposureLimit:
@@ -213,6 +239,7 @@ class TestBalanceCheck:
         manager.position_manager.get_position_count = Mock(return_value=10)
         manager.position_manager.get_position_by_market = Mock(return_value=None)
         manager.position_manager.get_total_exposure = Mock(return_value=1000.0)
+        manager._get_strategy_balance = Mock(return_value=None)
 
         signal = MockSignal()
         result = manager.check_signal(signal, balance=0.0)
@@ -228,6 +255,7 @@ class TestBalanceCheck:
         manager.position_manager.get_position_count = Mock(return_value=10)
         manager.position_manager.get_position_by_market = Mock(return_value=None)
         manager.position_manager.get_total_exposure = Mock(return_value=1000.0)
+        manager._get_strategy_balance = Mock(return_value=None)
 
         signal = MockSignal()
         result = manager.check_signal(signal, balance=-50.0)
@@ -326,6 +354,7 @@ class TestAvailableCapitalCalculation:
         manager.position_manager.get_position_by_market = Mock(return_value=None)
         manager.position_manager.get_total_exposure = Mock(return_value=1000.0)
         manager._check_drawdown = Mock(return_value=True)
+        manager._get_strategy_balance = Mock(return_value=None)
 
         signal = MockSignal()
         result = manager.check_signal(signal, balance=50.0)  # Small balance

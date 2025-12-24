@@ -164,3 +164,28 @@ export function useTableData(tableName: string, params?: Parameters<typeof api.g
     enabled: !!tableName,
   })
 }
+
+// Categorization monitoring hooks
+export function useCategorizationMetrics() {
+  return useQuery({
+    queryKey: ['categorizationMetrics'],
+    queryFn: api.getCategorizationMetrics,
+    refetchInterval: 60000,
+  })
+}
+
+export function useCategorizationRuns(limit = 25, offset = 0) {
+  return useQuery({
+    queryKey: ['categorizationRuns', limit, offset],
+    queryFn: () => api.getCategorizationRuns(limit, offset),
+    refetchInterval: 60000,
+  })
+}
+
+export function useCategorizationRules(limit = 50, offset = 0) {
+  return useQuery({
+    queryKey: ['categorizationRules', limit, offset],
+    queryFn: () => api.getCategorizationRules(limit, offset),
+    refetchInterval: 120000,
+  })
+}

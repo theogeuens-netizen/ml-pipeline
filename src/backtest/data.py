@@ -2,7 +2,6 @@
 Historical data loading for backtesting.
 
 Loads data from the historical_markets and historical_price_snapshots tables.
-These tables contain migrated data from futarchy's PostgreSQL database.
 
 Note: The historical_* tables are separate from polymarket-ml's operational
 data (markets, snapshots tables). Historical data is less granular and

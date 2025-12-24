@@ -24,6 +24,7 @@ msgpack==1.0.7
 # Data processing
 pandas==2.1.4
 numpy==1.26.3
+scipy==1.11.4
 
 # Utilities
 python-dotenv==1.0.0
@@ -34,6 +35,9 @@ pyyaml==6.0.1
 # Polymarket Trading
 py-clob-client==0.18.0
 PySocks==1.7.1  # SOCKS proxy support for requests
+
+# LLM
+openai==1.51.0
 
 # Testing
 pytest==7.4.4

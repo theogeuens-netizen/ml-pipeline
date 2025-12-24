@@ -66,6 +66,7 @@ class PositionManager:
         self,
         market_id: int,
         db: Optional[Session] = None,
+        strategy_name: Optional[str] = None,
     ) -> Optional[Position]:
         """
         Get open position for a specific market.
@@ -73,6 +74,7 @@ class PositionManager:
         Args:
             market_id: Market ID
             db: Optional database session
+            strategy_name: Optional strategy name to filter by (for isolation)
 
         Returns:
             Position if exists, None otherwise
@@ -82,11 +84,14 @@ class PositionManager:
             db = get_session().__enter__()
 
         try:
-            return db.query(Position).filter(
+            query = db.query(Position).filter(
                 Position.is_paper == self.is_paper,
                 Position.market_id == market_id,
                 Position.status == PositionStatus.OPEN.value,
-            ).first()
+            )
+            if strategy_name:
+                query = query.filter(Position.strategy_name == strategy_name)
+            return query.first()
         finally:
             if close_db:
                 db.close()
@@ -133,17 +138,36 @@ class PositionManager:
         positions = self.get_open_positions(db)
         return sum(float(p.cost_basis) for p in positions)
 
-    def get_position_count(self, db: Optional[Session] = None) -> int:
+    def get_position_count(
+        self,
+        db: Optional[Session] = None,
+        strategy_name: Optional[str] = None,
+    ) -> int:
         """
         Get count of open positions.
 
         Args:
             db: Optional database session
+            strategy_name: Optional strategy name filter
 
         Returns:
             Number of open positions
         """
-        return len(self.get_open_positions(db))
+        close_db = db is None
+        if db is None:
+            db = get_session().__enter__()
+
+        try:
+            query = db.query(Position).filter(
+                Position.is_paper == self.is_paper,
+                Position.status == PositionStatus.OPEN.value,
+            )
+            if strategy_name:
+                query = query.filter(Position.strategy_name == strategy_name)
+            return query.count()
+        finally:
+            if close_db:
+                db.close()
 
     def update_prices(
         self,

@@ -2,9 +2,6 @@
 Core backtesting engine for polymarket-ml strategies.
 
 Runs strategies against historical data and computes P&L.
-
-Ported from futarchy's backtesting infrastructure, adapted
-for polymarket-ml's Strategy interface.
 """
 
 from dataclasses import dataclass, field

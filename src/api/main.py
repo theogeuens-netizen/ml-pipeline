@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import structlog
 
-from src.api.routes import health, stats, markets, tasks, data_quality, monitoring, database
+from src.api.routes import health, stats, markets, tasks, data_quality, monitoring, database, categorization
 from src.api.routes import executor, strategies, executor_config, executor_ws
 
 logger = structlog.get_logger()
@@ -54,6 +54,7 @@ app.include_router(tasks.router, prefix="/api", tags=["Tasks"])
 app.include_router(data_quality.router, prefix="/api", tags=["Data Quality"])
 app.include_router(monitoring.router, prefix="/api", tags=["Monitoring"])
 app.include_router(database.router, prefix="/api", tags=["Database"])
+app.include_router(categorization.router, prefix="/api", tags=["Categorization"])
 
 # Executor routers
 app.include_router(executor.router, prefix="/api", tags=["Executor"])

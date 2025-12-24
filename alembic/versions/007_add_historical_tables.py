@@ -1,7 +1,6 @@
 """Add historical_markets and historical_price_snapshots tables for backtesting.
 
-These tables contain migrated data from futarchy's PostgreSQL database.
-They are separate from polymarket-ml's operational data and are used
+These tables are separate from polymarket-ml's operational data and are used
 only for backtesting, not for XGBoost training.
 
 Revision ID: 007

@@ -70,7 +70,7 @@ services:
 
   celery-worker:
     build: .
-    command: celery -A src.tasks.celery_app worker -l info -c 8 -Q default,discovery
+    command: celery -A src.tasks.celery_app worker -l info -c 8 -Q default,discovery,categorization
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/polymarket_ml
       - REDIS_URL=redis://redis:6379/0

@@ -39,6 +39,7 @@ class RiskConfigUpdate(BaseModel):
     """Request body for risk config update."""
     max_position_usd: Optional[float] = None
     max_total_exposure_usd: Optional[float] = None
+    max_positions_per_strategy: Optional[int] = None
     max_positions: Optional[int] = None
     max_drawdown_pct: Optional[float] = None
 
@@ -80,6 +81,7 @@ async def get_executor_config():
         "risk": {
             "max_position_usd": config.risk.max_position_usd,
             "max_total_exposure_usd": config.risk.max_total_exposure_usd,
+            "max_positions_per_strategy": config.risk.max_positions_per_strategy,
             "max_positions": config.risk.max_positions,
             "max_drawdown_pct": config.risk.max_drawdown_pct,
         },
@@ -173,6 +175,8 @@ async def update_risk_config(update: RiskConfigUpdate):
         config.risk.max_position_usd = update.max_position_usd
     if update.max_total_exposure_usd is not None:
         config.risk.max_total_exposure_usd = update.max_total_exposure_usd
+    if update.max_positions_per_strategy is not None:
+        config.risk.max_positions_per_strategy = update.max_positions_per_strategy
     if update.max_positions is not None:
         config.risk.max_positions = update.max_positions
     if update.max_drawdown_pct is not None:
@@ -185,6 +189,7 @@ async def update_risk_config(update: RiskConfigUpdate):
         "risk": {
             "max_position_usd": config.risk.max_position_usd,
             "max_total_exposure_usd": config.risk.max_total_exposure_usd,
+            "max_positions_per_strategy": config.risk.max_positions_per_strategy,
             "max_positions": config.risk.max_positions,
             "max_drawdown_pct": config.risk.max_drawdown_pct,
         },

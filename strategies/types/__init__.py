@@ -6,6 +6,7 @@ from strategies.types.mean_reversion import MeanReversionStrategy
 from strategies.types.whale_fade import WhaleFadeStrategy
 from strategies.types.flow import FlowStrategy
 from strategies.types.new_market import NewMarketStrategy
+from strategies.types.uncertain_zone import UncertainZoneStrategy
 
 STRATEGY_TYPES = {
     "no_bias": NoBiasStrategy,
@@ -14,6 +15,7 @@ STRATEGY_TYPES = {
     "whale_fade": WhaleFadeStrategy,
     "flow": FlowStrategy,
     "new_market": NewMarketStrategy,
+    "uncertain_zone": UncertainZoneStrategy,
 }
 
 __all__ = [
@@ -23,5 +25,6 @@ __all__ = [
     "WhaleFadeStrategy",
     "FlowStrategy",
     "NewMarketStrategy",
+    "UncertainZoneStrategy",
     "STRATEGY_TYPES",
 ]

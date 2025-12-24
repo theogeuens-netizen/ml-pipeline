@@ -28,11 +28,6 @@ logger = logging.getLogger(__name__)
 # Track connected clients
 connected_clients: list[WebSocket] = []
 
-# Last seen IDs for polling
-last_signal_id = 0
-last_trade_id = 0
-
-
 class ConnectionManager:
     """Manage WebSocket connections."""
 
@@ -209,9 +204,7 @@ async def send_positions_update(websocket: WebSocket):
 
 async def poll_updates(websocket: WebSocket):
     """Poll for new signals and trades."""
-    global last_signal_id, last_trade_id
-
-    # Initialize from DB
+    # Initialize from DB (per-connection state)
     with get_session() as db:
         latest_signal = db.query(Signal).order_by(desc(Signal.id)).first()
         latest_trade = db.query(ExecutorTrade).order_by(desc(ExecutorTrade.id)).first()
