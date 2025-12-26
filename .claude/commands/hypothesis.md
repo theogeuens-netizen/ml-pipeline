@@ -6,6 +6,16 @@ description: Generate a trading hypothesis for systematic testing
 
 Generate a testable trading hypothesis based on structural friction analysis.
 
+## Path Registry
+
+Read `configs/paths.py` for all path definitions. Key paths:
+- **experiments**: `/home/theo/polymarket-ml/experiments`
+- **ledger**: `/home/theo/polymarket-ml/ledger/insights.jsonl`
+- **strategies.yaml**: `/home/theo/polymarket-ml/strategies.yaml`
+
+**Strategy types** (from `STRATEGY_PARAMS`):
+- `uncertain_zone`, `no_bias`, `longshot`, `mean_reversion`, `whale_fade`, `flow`, `new_market`
+
 ## Database Location
 
 **Project root**: `/home/theo/polymarket-ml`
@@ -36,8 +46,8 @@ If no argument provided, ask which friction bucket to explore.
 ### Step 1: Check the Ledger
 
 ```bash
-cd /home/theo/polymarket-ml && python3 -m cli.ledger search $ARGUMENTS
-cd /home/theo/polymarket-ml && python3 -m cli.ledger stats
+cd /home/theo/polymarket-ml && DATABASE_URL=postgresql://postgres:postgres@localhost:5433/polymarket_ml python3 -m cli.ledger search $ARGUMENTS
+cd /home/theo/polymarket-ml && DATABASE_URL=postgresql://postgres:postgres@localhost:5433/polymarket_ml python3 -m cli.ledger stats
 ```
 
 Review prior experiments in this friction bucket:
@@ -48,7 +58,7 @@ Review prior experiments in this friction bucket:
 ### Step 2: Generate Experiment ID
 
 ```bash
-cd /home/theo/polymarket-ml && python3 -m cli.ledger next-id
+cd /home/theo/polymarket-ml && DATABASE_URL=postgresql://postgres:postgres@localhost:5433/polymarket_ml python3 -m cli.ledger next-id
 ```
 
 ### Step 3: Create spec.md
@@ -91,6 +101,24 @@ Create `experiments/<exp_id>/spec.md` using this structure:
 | <param2> | [x, y, z] | <why> |
 
 **Variants**: <N> total (max 9 recommended)
+
+## Execution Config
+
+Prompt user for these values or use defaults:
+
+### Sizing
+- **Method**: kelly | fixed_pct | fixed_amount (default: fixed_pct)
+- **Size**: 1% of capital (or $10 fixed)
+
+### Execution
+- **Order type**: market | spread | limit (default: market)
+- **Min edge after spread**: 3% (default)
+- **Max spread**: null (no limit) or specify (e.g., 4%)
+
+### Deployment
+- **Allocated USD**: $400 (default)
+- **Paper trade first**: Yes (default)
+- **Categories**: All or specify list
 
 ## Data Requirements
 <Which features from the 65+ available are needed>
@@ -149,3 +177,9 @@ Next: /test <exp_id>
 - Kill criteria MUST be quantitative, not vague
 - If you can't write a one-sentence hypothesis, ask for clarification
 - Check the ledger FIRST — don't repeat killed ideas
+- **PROMPT for Execution Config** if not specified by user:
+  - Sizing method (kelly/fixed_pct/fixed_amount)
+  - Order type (market/spread/limit)
+  - Allocated USD (default $400)
+  - Min edge after spread (default 3%)
+- Store execution config in spec.md for `/test` to use

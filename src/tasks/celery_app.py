@@ -64,6 +64,7 @@ app.conf.update(
         "src.tasks.snapshots.warm_gamma_cache": {"queue": "snapshots"},
         "src.tasks.discovery.*": {"queue": "discovery"},
         "src.tasks.categorization.*": {"queue": "categorization"},
+        "src.tasks.news.*": {"queue": "default"},
     },
     # Default queue
     task_default_queue="default",
@@ -140,6 +141,13 @@ app.conf.beat_schedule = {
         "task": "src.tasks.alerts.send_daily_summary",
         "schedule": crontab(hour=9, minute=0),  # Daily at 9:00 AM UTC
     },
+    # === NEWS COLLECTION ===
+    # Fetch crypto news from Marketaux (100 req/day free tier)
+    # 15-min intervals = 96 req/day, leaves margin for retries
+    "fetch-marketaux-news": {
+        "task": "src.tasks.news.fetch_marketaux_news",
+        "schedule": crontab(minute="*/15"),  # Every 15 minutes
+    },
     # === SNAPSHOT TASKS ===
     # Tier 0: > 48h to resolution, hourly snapshots
     "snapshot-tier-0": {
@@ -187,4 +195,4 @@ app.conf.beat_schedule = {
 app.autodiscover_tasks(["src.tasks"])
 
 # Explicitly import to ensure registration
-from src.tasks import discovery, snapshots, alerts, categorization  # noqa: F401, E402
+from src.tasks import discovery, snapshots, alerts, categorization, news  # noqa: F401, E402

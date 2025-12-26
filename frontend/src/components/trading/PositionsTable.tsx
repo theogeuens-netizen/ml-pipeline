@@ -1,21 +1,34 @@
 import { useState, useMemo } from 'react'
 import { clsx } from 'clsx'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, format } from 'date-fns'
 import { usePositions, useClosePosition } from '../../hooks/useExecutorData'
 import { useLeaderboard } from '../../hooks/useAnalystData'
 import { api } from '../../api/client'
 
-type SortField = 'strategy' | 'market' | 'pnl' | 'age' | 'size'
+type Tab = 'open' | 'historical'
+type SortField = 'strategy' | 'market' | 'pnl' | 'age' | 'size' | 'closed' | 'duration'
 type SortDirection = 'asc' | 'desc'
 
 export default function PositionsTable() {
-  const { data: positionsData, isLoading } = usePositions({ status: 'open', limit: 500 })
+  const [activeTab, setActiveTab] = useState<Tab>('open')
+  const { data: openPositionsData, isLoading: openLoading } = usePositions({ status: 'open', limit: 500 })
+  const { data: closedPositionsData, isLoading: closedLoading } = usePositions({ status: 'closed', limit: 500 })
+
+  const positionsData = activeTab === 'open' ? openPositionsData : closedPositionsData
+  const isLoading = activeTab === 'open' ? openLoading : closedLoading
   const { data: leaderboard } = useLeaderboard('total_pnl')
   const closeMutation = useClosePosition()
 
   const [strategyFilter, setStrategyFilter] = useState<string>('all')
-  const [sortField, setSortField] = useState<SortField>('pnl')
+  const [sortField, setSortField] = useState<SortField>(activeTab === 'open' ? 'pnl' : 'closed')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+
+  // Reset sort when switching tabs
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab)
+    setSortField(tab === 'open' ? 'pnl' : 'closed')
+    setSortDirection('desc')
+  }
 
   // Get unique strategy names
   const strategies = useMemo(() => {
@@ -46,8 +59,8 @@ export default function PositionsTable() {
           bVal = b.market_title || ''
           break
         case 'pnl':
-          aVal = a.unrealized_pnl ?? 0
-          bVal = b.unrealized_pnl ?? 0
+          aVal = activeTab === 'open' ? (a.unrealized_pnl ?? 0) : (a.realized_pnl ?? 0)
+          bVal = activeTab === 'open' ? (b.unrealized_pnl ?? 0) : (b.realized_pnl ?? 0)
           break
         case 'age':
           aVal = new Date(a.entry_time || 0).getTime()
@@ -57,6 +70,20 @@ export default function PositionsTable() {
           aVal = a.cost_basis ?? 0
           bVal = b.cost_basis ?? 0
           break
+        case 'closed':
+          aVal = new Date(a.exit_time || 0).getTime()
+          bVal = new Date(b.exit_time || 0).getTime()
+          break
+        case 'duration':
+          const aDuration = a.exit_time && a.entry_time
+            ? new Date(a.exit_time).getTime() - new Date(a.entry_time).getTime()
+            : 0
+          const bDuration = b.exit_time && b.entry_time
+            ? new Date(b.exit_time).getTime() - new Date(b.entry_time).getTime()
+            : 0
+          aVal = aDuration
+          bVal = bDuration
+          break
       }
 
       if (sortDirection === 'asc') {
@@ -65,7 +92,7 @@ export default function PositionsTable() {
         return aVal > bVal ? -1 : aVal < bVal ? 1 : 0
       }
     })
-  }, [positions, strategyFilter, sortField, sortDirection])
+  }, [positions, strategyFilter, sortField, sortDirection, activeTab])
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -82,11 +109,20 @@ export default function PositionsTable() {
 
   // Calculate totals
   const totals = useMemo(() => {
-    return filteredPositions.reduce((acc: any, p: any) => ({
+    const wins = filteredPositions.filter((p: any) => (p.realized_pnl ?? 0) > 0).length
+    const losses = filteredPositions.filter((p: any) => (p.realized_pnl ?? 0) < 0).length
+    const pnlField = activeTab === 'open' ? 'unrealized_pnl' : 'realized_pnl'
+    return filteredPositions.reduce((acc, p: any) => ({
       costBasis: acc.costBasis + (p.cost_basis ?? 0),
-      unrealizedPnl: acc.unrealizedPnl + (p.unrealized_pnl ?? 0),
-    }), { costBasis: 0, unrealizedPnl: 0 })
-  }, [filteredPositions])
+      pnl: acc.pnl + (p[pnlField] ?? 0),
+      wins,
+      losses,
+    }), { costBasis: 0, pnl: 0, wins: 0, losses: 0 })
+  }, [filteredPositions, activeTab])
+
+  const winRate = activeTab === 'historical' && totals.wins + totals.losses > 0
+    ? (totals.wins / (totals.wins + totals.losses)) * 100
+    : 0
 
   if (isLoading) {
     return (
@@ -108,10 +144,42 @@ export default function PositionsTable() {
       <div className="p-4 border-b border-gray-700">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <h3 className="text-white font-semibold">Open Positions</h3>
+            {/* Tabs */}
+            <div className="flex gap-1 bg-gray-900 rounded-lg p-1">
+              <button
+                onClick={() => handleTabChange('open')}
+                className={clsx(
+                  'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                  activeTab === 'open'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-gray-400 hover:text-white'
+                )}
+              >
+                Open ({openPositionsData?.items?.length || 0})
+              </button>
+              <button
+                onClick={() => handleTabChange('historical')}
+                className={clsx(
+                  'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                  activeTab === 'historical'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-gray-400 hover:text-white'
+                )}
+              >
+                Historical ({closedPositionsData?.items?.length || 0})
+              </button>
+            </div>
             <span className="text-gray-400 text-sm">
-              {filteredPositions.length} position{filteredPositions.length !== 1 ? 's' : ''}
+              {filteredPositions.length} {activeTab === 'open' ? 'position' : 'trade'}{filteredPositions.length !== 1 ? 's' : ''}
             </span>
+            {activeTab === 'historical' && filteredPositions.length > 0 && (
+              <span className={clsx(
+                'text-sm font-medium',
+                winRate >= 50 ? 'text-green-400' : 'text-red-400'
+              )}>
+                {winRate.toFixed(1)}% win rate
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -142,12 +210,12 @@ export default function PositionsTable() {
         <div className="p-8 text-center">
           <p className="text-gray-500">
             {strategyFilter !== 'all'
-              ? `No open positions for ${strategyFilter}`
-              : 'No open positions'
+              ? `No ${activeTab === 'open' ? 'open positions' : 'closed trades'} for ${strategyFilter}`
+              : `No ${activeTab === 'open' ? 'open positions' : 'closed trades yet'}`
             }
           </p>
         </div>
-      ) : (
+      ) : activeTab === 'open' ? (
         <>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -280,8 +348,160 @@ export default function PositionsTable() {
                 <span className="text-gray-300">
                   Size: ${totals.costBasis.toFixed(2)}
                 </span>
-                <span className={totals.unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}>
-                  P&L: {totals.unrealizedPnl >= 0 ? '+' : ''}${totals.unrealizedPnl.toFixed(2)}
+                <span className={totals.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
+                  P&L: {totals.pnl >= 0 ? '+' : ''}${totals.pnl.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        /* Historical positions table */
+        <>
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-gray-800">
+                <tr className="text-gray-400 text-xs border-b border-gray-700">
+                  <th
+                    className="py-3 px-3 text-left cursor-pointer hover:text-white"
+                    onClick={() => handleSort('strategy')}
+                  >
+                    Strategy {sortField === 'strategy' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    className="py-3 px-3 text-left cursor-pointer hover:text-white"
+                    onClick={() => handleSort('market')}
+                  >
+                    Market {sortField === 'market' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th className="py-3 px-3 text-left">Result</th>
+                  <th className="py-3 px-3 text-right">Entry</th>
+                  <th className="py-3 px-3 text-right">Exit</th>
+                  <th
+                    className="py-3 px-3 text-right cursor-pointer hover:text-white"
+                    onClick={() => handleSort('size')}
+                  >
+                    Size {sortField === 'size' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    className="py-3 px-3 text-right cursor-pointer hover:text-white"
+                    onClick={() => handleSort('pnl')}
+                  >
+                    P&L {sortField === 'pnl' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    className="py-3 px-3 text-right cursor-pointer hover:text-white"
+                    onClick={() => handleSort('duration')}
+                  >
+                    Duration {sortField === 'duration' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    className="py-3 px-3 text-right cursor-pointer hover:text-white"
+                    onClick={() => handleSort('closed')}
+                  >
+                    Closed {sortField === 'closed' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="text-sm">
+                {filteredPositions.map((pos: any) => {
+                  const entryTime = pos.entry_time ? new Date(pos.entry_time) : null
+                  const exitTime = pos.exit_time ? new Date(pos.exit_time) : null
+                  const pnlPct = pos.cost_basis > 0
+                    ? ((pos.realized_pnl ?? 0) / pos.cost_basis) * 100
+                    : 0
+                  const isWin = (pos.realized_pnl ?? 0) > 0
+
+                  // Calculate duration
+                  let duration = '-'
+                  if (entryTime && exitTime) {
+                    const ms = exitTime.getTime() - entryTime.getTime()
+                    const hours = Math.floor(ms / (1000 * 60 * 60))
+                    const days = Math.floor(hours / 24)
+                    if (days > 0) {
+                      duration = `${days}d ${hours % 24}h`
+                    } else {
+                      duration = `${hours}h`
+                    }
+                  }
+
+                  return (
+                    <tr
+                      key={pos.id}
+                      className="border-b border-gray-700/50 hover:bg-gray-700/30 transition-colors"
+                    >
+                      <td className="py-3 px-3">
+                        <span className="text-gray-300 font-mono text-xs">
+                          {pos.strategy_name}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span
+                          className="text-gray-300 text-xs max-w-[200px] truncate block"
+                          title={pos.market_title}
+                        >
+                          {pos.market_title?.substring(0, 40) || pos.market_id}...
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className={clsx(
+                          'px-2 py-0.5 rounded text-xs font-medium',
+                          isWin
+                            ? 'bg-green-900/50 text-green-400'
+                            : 'bg-red-900/50 text-red-400'
+                        )}>
+                          {isWin ? 'WIN' : 'LOSS'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-right text-gray-400 font-mono">
+                        {((pos.entry_price ?? 0) * 100).toFixed(1)}¢
+                      </td>
+                      <td className="py-3 px-3 text-right text-gray-400 font-mono">
+                        {((pos.exit_price ?? 0) * 100).toFixed(1)}¢
+                      </td>
+                      <td className="py-3 px-3 text-right text-gray-300 font-mono">
+                        ${(pos.cost_basis ?? 0).toFixed(2)}
+                      </td>
+                      <td className={clsx(
+                        'py-3 px-3 text-right font-mono',
+                        (pos.realized_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                      )}>
+                        <div>
+                          {(pos.realized_pnl ?? 0) >= 0 ? '+' : ''}${(pos.realized_pnl ?? 0).toFixed(2)}
+                        </div>
+                        <div className="text-xs opacity-75">
+                          ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%)
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-right text-gray-400 text-xs font-mono">
+                        {duration}
+                      </td>
+                      <td className="py-3 px-3 text-right text-gray-400 text-xs">
+                        {exitTime
+                          ? format(exitTime, 'MMM d, HH:mm')
+                          : '-'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Totals row */}
+          <div className="p-4 border-t border-gray-700 bg-gray-900/50">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <span className="text-gray-400 text-sm">Summary</span>
+                <span className="text-green-400 text-sm">{totals.wins} wins</span>
+                <span className="text-red-400 text-sm">{totals.losses} losses</span>
+              </div>
+              <div className="flex items-center gap-6 text-sm font-mono">
+                <span className="text-gray-300">
+                  Volume: ${totals.costBasis.toFixed(2)}
+                </span>
+                <span className={totals.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
+                  P&L: {totals.pnl >= 0 ? '+' : ''}${totals.pnl.toFixed(2)}
                 </span>
               </div>
             </div>

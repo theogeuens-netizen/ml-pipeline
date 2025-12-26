@@ -300,10 +300,11 @@ def save_validation_results(results: list[dict]) -> dict:
     from src.db.models import Market, CategorizationRule, RuleValidation
 
     if not results:
-        return {"validated": 0, "correct": 0, "incorrect": 0}
+        return {"validated": 0, "correct": 0, "incorrect": 0, "skipped": 0}
 
     correct_count = 0
     incorrect_count = 0
+    skipped_count = 0
 
     with get_session() as session:
         for r in results:
@@ -318,6 +319,33 @@ def save_validation_results(results: list[dict]) -> dict:
             if not market:
                 continue
 
+            # Check for duplicate validation - skip if already validated
+            existing = session.execute(
+                select(RuleValidation).where(RuleValidation.market_id == market_id)
+            ).scalar()
+            if existing:
+                print(f"  Skipping market {market_id}: already validated")
+                skipped_count += 1
+                continue
+
+            # Determine correct categories (use provided or fall back to current)
+            correct_l1 = r.get("correct_l1") or market.category_l1
+            correct_l2 = r.get("correct_l2") or market.category_l2
+            correct_l3 = r.get("correct_l3") or market.category_l3
+
+            # SANITY CHECK: Auto-correct is_correct based on category comparison
+            # This prevents corrupt data where is_correct=false but categories match
+            categories_match = (
+                correct_l1 == market.category_l1 and
+                correct_l2 == market.category_l2
+            )
+            if categories_match and not is_correct:
+                print(f"  Auto-correcting market {market_id}: categories match but marked incorrect")
+                is_correct = True
+            elif not categories_match and is_correct:
+                print(f"  Auto-correcting market {market_id}: categories differ but marked correct")
+                is_correct = False
+
             # Create validation record
             validation = RuleValidation(
                 market_id=market_id,
@@ -325,9 +353,9 @@ def save_validation_results(results: list[dict]) -> dict:
                 rule_l1=market.category_l1,
                 rule_l2=market.category_l2,
                 rule_l3=market.category_l3,
-                correct_l1=r.get("correct_l1") or market.category_l1,
-                correct_l2=r.get("correct_l2") or market.category_l2,
-                correct_l3=r.get("correct_l3") or market.category_l3,
+                correct_l1=correct_l1,
+                correct_l2=correct_l2,
+                correct_l3=correct_l3,
                 is_correct=is_correct,
                 validated_by="claude",
             )
@@ -364,9 +392,10 @@ def save_validation_results(results: list[dict]) -> dict:
         session.commit()
 
     return {
-        "validated": len(results),
+        "validated": correct_count + incorrect_count,
         "correct": correct_count,
         "incorrect": incorrect_count,
+        "skipped": skipped_count,
     }
 
 

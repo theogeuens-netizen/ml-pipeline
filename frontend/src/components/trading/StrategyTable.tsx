@@ -9,6 +9,7 @@ interface StrategyRow {
   name: string
   allocated: number
   current: number
+  portfolio_value: number
   unrealized_pnl: number
   realized_pnl: number
   total_pnl: number
@@ -94,6 +95,7 @@ export default function StrategyTable() {
         name: s.strategy_name,
         allocated: balance?.allocated_usd ?? s.allocated_usd ?? 400,
         current: balance?.current_usd ?? s.current_usd ?? 400,
+        portfolio_value: balance?.portfolio_value ?? (balance?.current_usd ?? s.current_usd ?? 400),
         unrealized_pnl: s.unrealized_pnl ?? 0,
         realized_pnl: s.realized_pnl ?? 0,
         total_pnl: s.total_pnl ?? 0,
@@ -175,6 +177,7 @@ export default function StrategyTable() {
               <SortHeader label="Strategy" field="name" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
               <th className="pb-3 px-3 text-right">Allocated</th>
               <th className="pb-3 px-3 text-right">Current</th>
+              <th className="pb-3 px-3 text-right" title="Cash + Open Positions Value">Total Value</th>
               <SortHeader label="Unrealized" field="unrealized_pnl" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
               <SortHeader label="Realized" field="realized_pnl" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
               <SortHeader label="Total P&L" field="total_pnl" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
@@ -213,6 +216,9 @@ export default function StrategyTable() {
                   </td>
                   <td className="py-3 px-3 text-right text-white font-mono">
                     ${strategy.current.toFixed(0)}
+                  </td>
+                  <td className="py-3 px-3 text-right text-indigo-300 font-mono font-medium">
+                    ${strategy.portfolio_value.toFixed(0)}
                   </td>
                   <td className={clsx(
                     'py-3 px-3 text-right font-mono',
@@ -268,7 +274,7 @@ export default function StrategyTable() {
                 </tr>
                 {expandedRow === strategy.name && (
                   <tr key={`${strategy.name}-expanded`} className="bg-gray-900/50">
-                    <td colSpan={12} className="py-4 px-6">
+                    <td colSpan={13} className="py-4 px-6">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div>
                           <p className="text-gray-500 text-xs mb-1">Alert Status</p>

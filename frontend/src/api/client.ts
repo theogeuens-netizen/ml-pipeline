@@ -365,13 +365,14 @@ export interface ExecutorTrade {
   id: number
   order_id: number
   position_id: number | null
+  strategy_name: string | null
   is_paper: boolean
   price: number | null
   size_shares: number | null
   size_usd: number | null
   side: string
   fee_usd: number | null
-  executed_at: string | null
+  timestamp: string | null
 }
 
 export interface ExecutorOrder {
@@ -831,11 +832,13 @@ export const api = {
 
   getTrades: (params?: {
     is_paper?: boolean
+    strategy?: string
     limit?: number
     offset?: number
   }) => {
     const searchParams = new URLSearchParams()
     if (params?.is_paper !== undefined) searchParams.set('is_paper', String(params.is_paper))
+    if (params?.strategy) searchParams.set('strategy', params.strategy)
     if (params?.limit) searchParams.set('limit', String(params.limit))
     if (params?.offset) searchParams.set('offset', String(params.offset))
     const qs = searchParams.toString()

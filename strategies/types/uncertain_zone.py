@@ -24,12 +24,14 @@ class UncertainZoneStrategy(Strategy):
         expected_no_rate: float = 0.55,  # Conservative estimate
         min_edge_after_spread: float = 0.03,  # 3% minimum edge after spread
         max_spread: float = None,  # Optional: maximum spread to trade (e.g., 0.04 = 4%)
+        categories: list = None,  # Optional: only trade these L1 categories
+        excluded_categories: list = None,  # Optional: exclude these L1 categories
         size_pct: float = 0.01,
         order_type: str = "market",
         **kwargs,
     ):
         self.name = name
-        self.version = "2.0.0"  # Updated for after-spread edge
+        self.version = "2.2.0"  # Fixed NO token pricing (was using YES orderbook)
         self.yes_price_min = yes_price_min
         self.yes_price_max = yes_price_max
         self.min_hours = min_hours
@@ -38,6 +40,8 @@ class UncertainZoneStrategy(Strategy):
         self.expected_no_rate = expected_no_rate
         self.min_edge_after_spread = min_edge_after_spread
         self.max_spread = max_spread
+        self.categories = categories or []  # Empty = all categories
+        self.excluded_categories = excluded_categories or []
         self.size_pct = size_pct
         self.order_type = order_type
         super().__init__()
@@ -46,6 +50,12 @@ class UncertainZoneStrategy(Strategy):
         for m in markets:
             # Token check - need NO token
             if not m.no_token_id:
+                continue
+
+            # Category filter (if specified)
+            if self.categories and m.category_l1 not in self.categories:
+                continue
+            if self.excluded_categories and m.category_l1 in self.excluded_categories:
                 continue
 
             # Time window - must be positive and within range
@@ -102,17 +112,23 @@ class UncertainZoneStrategy(Strategy):
             if m.best_bid is not None and m.best_ask is not None:
                 spread = m.best_ask - m.best_bid
 
+            # Convert YES orderbook to NO orderbook for correct execution pricing
+            # NO bid = 1 - YES ask (someone buying NO = someone selling YES)
+            # NO ask = 1 - YES bid (someone selling NO = someone buying YES)
+            no_best_bid = 1 - m.best_ask if m.best_ask is not None else None
+            no_best_ask = 1 - m.best_bid if m.best_bid is not None else None
+
             yield Signal(
                 token_id=m.no_token_id,
                 side=Side.BUY,
                 reason=f"UncertainZone: YES@{yes_price:.1%}, NO@{no_ask:.1%}, edge={edge_after_spread:.1%}",
                 market_id=m.id,
-                price_at_signal=m.price,
+                price_at_signal=no_ask,  # NO price, not YES price
                 edge=edge_after_spread,  # After-spread edge for Kelly sizing
                 confidence=confidence,
                 size_usd=None,
-                best_bid=m.best_bid,
-                best_ask=m.best_ask,
+                best_bid=no_best_bid,    # NO orderbook, not YES
+                best_ask=no_best_ask,    # NO orderbook, not YES
                 strategy_name=self.name,
                 strategy_sha=self.get_sha(),
                 market_snapshot=m.snapshot,
@@ -123,6 +139,7 @@ class UncertainZoneStrategy(Strategy):
                     "spread": spread,
                     "hours_to_close": m.hours_to_close,
                     "expected_no_rate": self.expected_no_rate,
+                    "size_pct": self.size_pct,  # Per-strategy sizing
                 },
             )
 
@@ -130,20 +147,38 @@ class UncertainZoneStrategy(Strategy):
         """Return debug info about why strategy isn't trading."""
         total = len(markets)
 
+        # Category filter
+        if self.categories:
+            in_category = sum(1 for m in markets if m.category_l1 in self.categories)
+        elif self.excluded_categories:
+            in_category = sum(1 for m in markets if m.category_l1 not in self.excluded_categories)
+        else:
+            in_category = total
+
         in_time = sum(
             1 for m in markets
             if m.hours_to_close and self.min_hours <= m.hours_to_close <= self.max_hours
+            and (not self.categories or m.category_l1 in self.categories)
+            and (not self.excluded_categories or m.category_l1 not in self.excluded_categories)
         )
 
         in_zone = sum(
             1 for m in markets
             if m.hours_to_close and self.min_hours <= m.hours_to_close <= self.max_hours
             and m.price and self.yes_price_min <= m.price <= self.yes_price_max
+            and (not self.categories or m.category_l1 in self.categories)
+            and (not self.excluded_categories or m.category_l1 not in self.excluded_categories)
         )
 
         with_spread = 0
         with_edge = 0
         for m in markets:
+            # Category filter
+            if self.categories and m.category_l1 not in self.categories:
+                continue
+            if self.excluded_categories and m.category_l1 in self.excluded_categories:
+                continue
+
             if not m.hours_to_close:
                 continue
             if not (self.min_hours <= m.hours_to_close <= self.max_hours):
@@ -166,9 +201,13 @@ class UncertainZoneStrategy(Strategy):
                 if edge >= self.min_edge_after_spread:
                     with_edge += 1
 
+        # Build funnel string
+        cat_filter = f" → {in_category} (cats)" if (self.categories or self.excluded_categories) else ""
         spread_filter = f" → {with_spread} (spread)" if self.max_spread else ""
+
         return {
             "total_markets": total,
+            "in_category": in_category,
             "in_time_window": in_time,
             "in_price_zone": in_zone,
             "with_valid_spread": with_spread,
@@ -179,6 +218,8 @@ class UncertainZoneStrategy(Strategy):
                 "expected_no_rate": f"{self.expected_no_rate:.0%}",
                 "min_edge": f"{self.min_edge_after_spread:.0%}",
                 "max_spread": f"{self.max_spread:.0%}" if self.max_spread else "none",
+                "categories": self.categories if self.categories else "all",
+                "excluded_categories": self.excluded_categories if self.excluded_categories else "none",
             },
-            "funnel": f"{total} → {in_time} (time) → {in_zone} (zone){spread_filter} → {with_edge} (edge≥{self.min_edge_after_spread:.0%})",
+            "funnel": f"{total}{cat_filter} → {in_time} (time) → {in_zone} (zone){spread_filter} → {with_edge} (edge≥{self.min_edge_after_spread:.0%})",
         }

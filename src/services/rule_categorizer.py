@@ -227,18 +227,40 @@ class RuleCategorizer:
                 return True
         return False
 
+    # L3 priority order - more specific patterns first
+    L3_PRIORITY = [
+        "DIRECTION_15MIN",
+        "DIRECTION_HOURLY",
+        "DIRECTION_DAILY",
+        "ABOVE_THRESHOLD",
+        "BELOW_THRESHOLD",
+        "PRICE_RANGE",
+        "REACH_TARGET",
+        "PRICE_MOVEMENT",
+    ]
+
     def _detect_l3(self, text: str, rule: CategorizationRule) -> str:
         """
         Detect L3 category based on text patterns.
 
-        Uses rule-specific L3 patterns, then falls back to default.
+        Uses rule-specific L3 patterns in priority order, then falls back to default.
+        Priority order ensures time-based patterns are checked before price patterns.
         """
-        # Check rule-specific L3 patterns
+        # Check rule-specific L3 patterns in priority order
         if rule.id in self._compiled_l3_patterns:
-            for l3, patterns in self._compiled_l3_patterns[rule.id].items():
-                for pattern in patterns:
-                    if pattern.search(text):
-                        return l3
+            patterns_dict = self._compiled_l3_patterns[rule.id]
+            # Check in priority order
+            for l3 in self.L3_PRIORITY:
+                if l3 in patterns_dict:
+                    for pattern in patterns_dict[l3]:
+                        if pattern.search(text):
+                            return l3
+            # Check any remaining L3s not in priority list
+            for l3, patterns in patterns_dict.items():
+                if l3 not in self.L3_PRIORITY:
+                    for pattern in patterns:
+                        if pattern.search(text):
+                            return l3
 
         # Use default L3 if available
         if rule.l3_default:

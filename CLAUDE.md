@@ -43,6 +43,7 @@ Strategy:
 | Per-Strategy Wallets | COMPLETE | Dec 20, 2024 |
 | Performance Tracking (Sharpe) | COMPLETE | Dec 20, 2024 |
 | Strategy Debug CLI | COMPLETE | Dec 20, 2024 |
+| BigQuery Backtesting | COMPLETE | Dec 25, 2024 |
 | ML Pipeline | NOT STARTED | - |
 
 **Current Phase**: 1 OPERATIONAL - Data collection running at ~100% success rate
@@ -138,6 +139,7 @@ docker-compose ps
 | `USER_GUIDE.md` | User-friendly guide: research → deployment |
 | `src/services/rule_categorizer.py` | Rule-based market categorization |
 | `src/backtest/robustness.py` | Time/liquidity/category split testing |
+| `src/backtest/bigquery.py` | BigQuery backtest engine (default) |
 | `cli/categorize_helpers.py` | Categorization CLI helpers |
 | `cli/ledger.py` | Ledger query tool |
 | `cli/robustness.py` | Robustness check CLI |
@@ -756,6 +758,102 @@ From `/trading` mode, use:
 
 ---
 
+## BigQuery Backtesting
+
+The backtesting engine uses BigQuery by default for efficient server-side filtering and aggregation. This avoids loading large datasets into memory (170K markets + 11M snapshots crashed the PostgreSQL approach).
+
+### Configuration
+
+```
+Project: elite-buttress-480609-b0
+Dataset: longshot
+Tables: historical_markets, historical_snapshots
+Location: EU
+```
+
+### CLI Usage
+
+```bash
+# Simple backtest (BigQuery - default)
+python -m cli.backtest --side NO --yes-min 0.55 --yes-max 0.95
+
+# With robustness checks
+python -m cli.backtest --side NO --robustness
+
+# Category-specific
+python -m cli.backtest --side NO --category Crypto --hours-min 12 --hours-max 48
+
+# Show data statistics
+python -m cli.backtest --stats
+
+# Robustness checks
+python -m cli.robustness --side NO --yes-min 0.55 --all
+
+# From experiment config
+python -m cli.robustness experiments/exp-001/config.yaml --all
+
+# Legacy PostgreSQL mode (fallback, slower)
+python -m cli.backtest --use-postgres --side NO --days 30
+```
+
+### Query Efficiency Guidelines
+
+**DO:**
+1. **Aggregate in SQL** - Never return raw rows, always use COUNT/SUM/AVG
+2. **Use ROW_NUMBER()** - Deduplicate to one snapshot per market in SQL
+3. **Filter early** - Put all WHERE conditions in the main CTE
+4. **Return only metrics** - Dict of floats, not DataFrames or objects
+5. **Use SAFE_DIVIDE** - Avoid division by zero errors
+
+**DON'T:**
+1. **Don't SELECT \*** - Always specify exact columns needed
+2. **Don't load to DataFrame** - Use `client.query().result()` directly
+3. **Don't iterate rows in Python** - Aggregate in SQL
+4. **Don't use multiple queries** - Combine with CTEs where possible
+
+### Schema Notes
+
+- **Timestamps are in nanoseconds** - Divide by 1e9 for seconds
+- **Winner field** - Contains "Yes"/"No" (not "YES"/"NO")
+- **Liquidity column** - All zeros (unusable, don't filter by it)
+- **Volume** - In USD, ranges from 0 to 400M
+
+### Key Functions
+
+```python
+from src.backtest.bigquery import (
+    run_bq_backtest,      # Run simple backtest
+    run_bq_robustness,    # Run with time/volume/category splits
+    get_bq_data_stats,    # Get dataset statistics
+    format_bq_backtest_summary,    # Format results
+    format_bq_robustness_summary,  # Format robustness results
+)
+
+# Example usage
+metrics = run_bq_backtest(
+    side="NO",
+    yes_price_min=0.55,
+    yes_price_max=0.95,
+    hours_min=12,
+    hours_max=48,
+    min_volume=1000,
+    categories=["Crypto", "Sports"],
+)
+print(f"Win rate: {metrics.win_rate:.1%}, Sharpe: {metrics.sharpe:.2f}")
+```
+
+### Robustness Checks
+
+All strategies must pass these checks to avoid overfitting:
+
+| Check | Purpose | Pass Criteria |
+|-------|---------|---------------|
+| Time Split | First half vs second half | Both halves profitable |
+| Volume Split | High vs low volume markets | Edge consistent across volume |
+| Category Split | Per macro_category | 50%+ categories have edge |
+
+---
+
 ## Database Tables
 
 | Table | Purpose | Row Count |
@@ -787,11 +885,12 @@ From `/trading` mode, use:
 - **Performance tracking**: Sharpe, Sortino, drawdown in `strategies/performance.py`
 - **Debug CLI**: `python -m cli.debug <strategy_name>` to diagnose issues
 - **Telegram alerts**: Configure `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to enable
+- **BigQuery backtesting**: Default engine for backtests (`python -m cli.backtest`), use `--use-postgres` for legacy mode
 - **Next priorities**:
-  1. Monitor strategy performance via leaderboard (`python -m cli.debug`)
-  2. Add new strategy variants by editing `strategies.yaml` (no code changes)
-  3. Begin ML pipeline design once sufficient resolved markets exist
-  4. Consider adding more sophisticated backtesting with slippage simulation
+  1. Run `/verdict exp-004` to evaluate behavioral NO bias experiment results
+  2. Monitor strategy performance via leaderboard (`python -m cli.debug`)
+  3. Add new strategy variants by editing `strategies.yaml` (no code changes)
+  4. Begin ML pipeline design once sufficient resolved markets exist
 
 ---
 

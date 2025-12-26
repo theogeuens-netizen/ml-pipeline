@@ -282,17 +282,26 @@ async def list_decisions(
 @router.get("/trades")
 async def list_trades(
     is_paper: Optional[bool] = Query(None, description="Filter by paper/live"),
+    strategy: Optional[str] = Query(None, description="Filter by strategy name"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
     """
     List trades with filtering and pagination.
+    Includes strategy_name via join with positions table.
     """
-    query = select(ExecutorTrade)
+    # Join with Position to get strategy_name
+    query = (
+        select(ExecutorTrade, Position.strategy_name)
+        .outerjoin(Position, ExecutorTrade.position_id == Position.id)
+    )
 
     if is_paper is not None:
         query = query.where(ExecutorTrade.is_paper == is_paper)
+
+    if strategy:
+        query = query.where(Position.strategy_name == strategy)
 
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
@@ -300,13 +309,13 @@ async def list_trades(
 
     # Apply pagination and ordering
     query = query.order_by(desc(ExecutorTrade.timestamp)).offset(offset).limit(limit)
-    trades = db.execute(query).scalars().all()
+    results = db.execute(query).all()
 
     return {
         "total": total,
         "limit": limit,
         "offset": offset,
-        "items": [_format_trade(t) for t in trades],
+        "items": [_format_trade_with_strategy(t, strategy_name) for t, strategy_name in results],
     }
 
 
@@ -772,6 +781,23 @@ def _format_trade(t: ExecutorTrade) -> dict:
         "id": t.id,
         "order_id": t.order_id,
         "position_id": t.position_id,
+        "is_paper": t.is_paper,
+        "price": float(t.price) if t.price else None,
+        "size_shares": float(t.size_shares) if t.size_shares else None,
+        "size_usd": float(t.size_usd) if t.size_usd else None,
+        "side": t.side,
+        "fee_usd": float(t.fee_usd) if t.fee_usd else None,
+        "timestamp": t.timestamp.isoformat() if t.timestamp else None,
+    }
+
+
+def _format_trade_with_strategy(t: ExecutorTrade, strategy_name: Optional[str]) -> dict:
+    """Format trade for API response, including strategy name from position."""
+    return {
+        "id": t.id,
+        "order_id": t.order_id,
+        "position_id": t.position_id,
+        "strategy_name": strategy_name,
         "is_paper": t.is_paper,
         "price": float(t.price) if t.price else None,
         "size_shares": float(t.size_shares) if t.size_shares else None,

@@ -13,6 +13,8 @@ const keys = {
   funnelStats: (hours: number, strategy?: string) => ['analyst', 'funnel-stats', hours, strategy] as const,
   decisions: (params?: { strategy?: string; executed?: boolean; limit?: number; offset?: number }) =>
     ['analyst', 'decisions', params] as const,
+  trades: (params?: { strategy?: string; limit?: number; offset?: number }) =>
+    ['analyst', 'trades', params] as const,
   strategyMetrics: (name: string) => ['analyst', 'strategy', name, 'metrics'] as const,
   strategyDebug: (name: string) => ['analyst', 'strategy', name, 'debug'] as const,
 }
@@ -77,6 +79,20 @@ export function useDecisions(params?: {
   return useQuery({
     queryKey: keys.decisions(params),
     queryFn: () => api.getDecisions(params),
+    refetchInterval: autoRefresh ? REFRESH_INTERVAL : false,
+    staleTime: autoRefresh ? REFRESH_INTERVAL / 2 : Infinity,
+  })
+}
+
+// Executed trades with strategy filtering
+export function useTrades(params?: {
+  strategy?: string
+  limit?: number
+  offset?: number
+}, autoRefresh = true) {
+  return useQuery({
+    queryKey: keys.trades(params),
+    queryFn: () => api.getTrades(params),
     refetchInterval: autoRefresh ? REFRESH_INTERVAL : false,
     staleTime: autoRefresh ? REFRESH_INTERVAL / 2 : Infinity,
   })

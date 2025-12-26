@@ -411,6 +411,53 @@ class RuleValidation(Base):
 
 
 # ============================================================================
+# NEWS DATA MODELS
+# ============================================================================
+# News articles from external APIs (Marketaux, GDELT) for XGBoost features.
+# ============================================================================
+
+
+class NewsItem(Base):
+    """
+    News articles from external APIs.
+
+    Sources:
+    - Marketaux: Crypto/financial news with sentiment
+    - GDELT: Global news (stored separately in BigQuery, but can cache here)
+
+    Used to compute news features for XGBoost training:
+    - news_count_24h, news_sentiment_avg, news_momentum, etc.
+    """
+    __tablename__ = "news_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Source tracking
+    source: Mapped[str] = mapped_column(String(50), index=True)  # "marketaux", "gdelt"
+    source_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True)  # Dedupe key
+
+    # Content
+    title: Mapped[str] = mapped_column(Text)
+    snippet: Mapped[Optional[str]] = mapped_column(Text)  # Article excerpt
+    url: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Timestamps
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Sentiment (API-provided)
+    sentiment_score: Mapped[Optional[float]] = mapped_column(Numeric(10, 6))  # -1 to 1 or API-specific
+
+    # Categorization
+    category: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # CRYPTO, POLITICS, etc.
+    symbols: Mapped[Optional[list]] = mapped_column(JSONB)  # ["BTC", "ETH"] for crypto
+    entities: Mapped[Optional[dict]] = mapped_column(JSONB)  # Named entities
+
+    # Raw API response (for future reprocessing)
+    raw_response: Mapped[Optional[dict]] = mapped_column(JSONB)
+
+
+# ============================================================================
 # HISTORICAL DATA MODELS (for backtesting)
 # ============================================================================
 # These tables are separate from polymarket-ml's operational data and are used

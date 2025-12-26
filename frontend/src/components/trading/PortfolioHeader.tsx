@@ -6,14 +6,20 @@ interface KPICardProps {
   value: string
   change?: string
   changeType?: 'positive' | 'negative' | 'neutral'
+  valueColorType?: 'positive' | 'negative' | 'neutral'
   subtext?: string
 }
 
-function KPICard({ label, value, change, changeType = 'neutral', subtext }: KPICardProps) {
+function KPICard({ label, value, change, changeType = 'neutral', valueColorType, subtext }: KPICardProps) {
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
       <p className="text-gray-400 text-sm font-medium mb-1">{label}</p>
-      <p className="text-2xl font-bold text-white font-mono">{value}</p>
+      <p className={clsx(
+        'text-2xl font-bold font-mono',
+        valueColorType === 'positive' && 'text-green-400',
+        valueColorType === 'negative' && 'text-red-400',
+        !valueColorType && 'text-white'
+      )}>{value}</p>
       {change && (
         <p className={clsx(
           'text-sm font-medium mt-1',
@@ -90,18 +96,18 @@ export default function PortfolioHeader() {
       <KPICard
         label="Unrealized P&L"
         value={formatCurrency(unrealized_pnl, true)}
-        changeType={unrealized_pnl >= 0 ? 'positive' : 'negative'}
+        valueColorType={unrealized_pnl >= 0 ? 'positive' : 'negative'}
         change={`${open_positions} open positions`}
       />
       <KPICard
         label="Realized P&L"
         value={formatCurrency(realized_pnl, true)}
-        changeType={realized_pnl >= 0 ? 'positive' : 'negative'}
+        valueColorType={realized_pnl >= 0 ? 'positive' : 'negative'}
       />
       <KPICard
         label="Total Return"
         value={formatPercent(total_return_pct, true)}
-        changeType={total_return_pct >= 0 ? 'positive' : 'negative'}
+        valueColorType={total_return_pct >= 0 ? 'positive' : 'negative'}
         subtext={`HWM: ${formatCurrency(data.high_water_mark)}`}
       />
       <KPICard

@@ -350,13 +350,13 @@ class ExecutorRunner:
                 decision.rejected_reason = signal_model.status_reason
                 logger.debug(signal_model.status_reason)
             elif check.approved:
-                # Calculate size using strategy's allocated capital for Kelly
-                # Get strategy balance from DB for proper Kelly sizing
+                # Calculate size using strategy's AVAILABLE capital for Kelly
+                # Use current_usd (not allocated_usd) so sizing reflects capital not tied up in positions
                 from src.executor.models import StrategyBalance
                 strategy_balance_record = db.query(StrategyBalance).filter(
                     StrategyBalance.strategy_name == signal.strategy_name
                 ).first()
-                strategy_capital = float(strategy_balance_record.allocated_usd) if strategy_balance_record else 400.0
+                strategy_capital = float(strategy_balance_record.current_usd) if strategy_balance_record else 400.0
 
                 size = self.position_sizer.calculate_size(
                     signal,

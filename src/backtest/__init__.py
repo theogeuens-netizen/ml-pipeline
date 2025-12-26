@@ -43,6 +43,16 @@ from .robustness import (
     run_all_robustness_checks,
     format_robustness_results,
 )
+from .bigquery import (
+    BacktestMetrics,
+    RobustnessResult as BQRobustnessResult,
+    run_bq_backtest,
+    run_bq_robustness,
+    get_bq_client,
+    get_bq_data_stats,
+    format_bq_backtest_summary,
+    format_bq_robustness_summary,
+)
 
 __all__ = [
     # Metrics
@@ -78,4 +88,13 @@ __all__ = [
     "category_split_backtest",
     "run_all_robustness_checks",
     "format_robustness_results",
+    # BigQuery (default for backtesting)
+    "BacktestMetrics",
+    "BQRobustnessResult",
+    "run_bq_backtest",
+    "run_bq_robustness",
+    "get_bq_client",
+    "get_bq_data_stats",
+    "format_bq_backtest_summary",
+    "format_bq_robustness_summary",
 ]

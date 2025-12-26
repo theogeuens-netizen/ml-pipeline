@@ -79,7 +79,7 @@ export default function Trading() {
       {/* Strategy Performance Table */}
       <StrategyTable />
 
-      {/* Open Positions */}
+      {/* Positions (Open + Historical tabs) */}
       <PositionsTable />
 
       {/* Footer info */}

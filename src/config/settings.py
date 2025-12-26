@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # ===========================================
+    # News APIs
+    # ===========================================
+    marketaux_api_key: str = ""  # Get from https://www.marketaux.com/
 
 
 @lru_cache()

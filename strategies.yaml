@@ -54,42 +54,71 @@ uncertain_zone:
     expected_no_rate: 0.55
     max_spread: 0.02
 
+  # Category exclusion variants - test if specific categories drive edge
+  - name: no_bias_tight_2h_no_crypto
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    excluded_categories:
+      - CRYPTO
+
+  - name: no_bias_tight_2h_no_sports
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    excluded_categories:
+      - SPORTS
+
+  - name: no_bias_tight_2h_no_crypto_sports
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    excluded_categories:
+      - CRYPTO
+      - SPORTS
+
   # =========================================================================
-  # GROUP B: Underdog NO (NO price 0.30-0.50, YES 0.50-0.70)
+  # GROUP B: Underdog NO (YES 0.55-0.70, so NO is 0.30-0.45)
   # Buy cheap NO tokens expecting them to win more than priced
   # =========================================================================
   - name: no_bias_underdog_12h
-    yes_price_min: 0.30
-    yes_price_max: 0.50
+    yes_price_min: 0.55
+    yes_price_max: 0.70
     min_hours: 12
     max_hours: 14
-    expected_no_rate: 0.50         # NO priced at 30-50%, expect 50%
+    expected_no_rate: 0.50         # NO priced at 30-45%, expect 50%
 
   - name: no_bias_underdog_12h_alt
-    yes_price_min: 0.30
-    yes_price_max: 0.50
+    yes_price_min: 0.55
+    yes_price_max: 0.70
     min_hours: 12
     max_hours: 14
-    expected_no_rate: 0.50         # Variant but with same expected NO win rate
+    expected_no_rate: 0.52         # Slightly higher expectation variant
 
   - name: no_bias_underdog_24h
-    yes_price_min: 0.30
-    yes_price_max: 0.50
+    yes_price_min: 0.55
+    yes_price_max: 0.70
     min_hours: 24
     max_hours: 26
     expected_no_rate: 0.52         # Slightly higher edge at 24h
 
   - name: no_bias_underdog_36h
-    yes_price_min: 0.30
-    yes_price_max: 0.50
+    yes_price_min: 0.55
+    yes_price_max: 0.70
     min_hours: 36
     max_hours: 38
     expected_no_rate: 0.54         # Best edge at 36h
 
   # Short-window underdog variants (2-4h)
   - name: no_bias_underdog_2h
-    yes_price_min: 0.30
-    yes_price_max: 0.50
+    yes_price_min: 0.55
+    yes_price_max: 0.70
     min_hours: 2
     max_hours: 4
     expected_no_rate: 0.50
@@ -129,3 +158,118 @@ uncertain_zone:
     max_hours: 14
     expected_no_rate: 0.55
     min_volume: 500                # Require at least $500 24h volume for entries
+
+  # =========================================================================
+  # FAVORITE ZONE STRATEGIES (exp-004)
+  # Exploit behavioral bias: YES favorites (0.70-0.95) are overpriced
+  # Backtest: 72.9% WR, Sharpe 19.1, 25K trades
+  # Deployed: 2024-12-25
+  # =========================================================================
+
+  # 24-96h window variants
+  - name: favorite_no_24_96h_v100
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 24
+    max_hours: 96
+    expected_no_rate: 0.70         # From exp-004 backtest (72.9% actual)
+    min_volume: 100
+    # Experiment: exp-004:v4+v6+v8
+
+  - name: favorite_no_24_96h_v100_no_crypto_sports
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 24
+    max_hours: 96
+    expected_no_rate: 0.70
+    min_volume: 100
+    excluded_categories:
+      - CRYPTO
+      - SPORTS
+
+  - name: favorite_no_24_96h_v500
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 24
+    max_hours: 96
+    expected_no_rate: 0.70
+    min_volume: 500
+    # Experiment: exp-004:v4+v6+v9
+
+  # 48-168h window variants
+  - name: favorite_no_48_168h_v100
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 48
+    max_hours: 168
+    expected_no_rate: 0.70
+    min_volume: 100
+    # Experiment: exp-004:v4+v7+v8
+
+  - name: favorite_no_48_168h_v500
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 48
+    max_hours: 168
+    expected_no_rate: 0.70
+    min_volume: 500
+    # Experiment: exp-004:v4+v7+v9
+
+  # Top categories only - highest edge from exp-004 category analysis
+  # WEATHER 89%, SCIENCE 86%, ESPORTS 85%, TECH 84%, OTHER 82% WR
+  - name: favorite_no_24_96h_top_cats
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 24
+    max_hours: 96
+    expected_no_rate: 0.85         # Higher rate for top categories (avg 85% WR)
+    min_volume: 100
+    size_pct: 0.10                 # 10% per trade (higher conviction, fewer opportunities)
+    categories:
+      - WEATHER
+      - SCIENCE
+      - ESPORTS
+      - TECH
+      - OTHER
+    # Experiment: exp-004:v4+v6 with L1 category filter
+    # Expected: ~3.4K trades, 80-89% WR, Sharpe 25-33
+
+# =============================================================================
+# LONGSHOT STRATEGIES
+# Buy high-probability NO outcomes near expiry (2-72h)
+# Dynamic spread: 3% at NO=0.85, 1% at NO=0.95
+# =============================================================================
+longshot:
+  - name: longshot_no_all
+    side: "NO"
+    min_probability: 0.85
+    max_probability: 0.95
+    min_hours: 2
+    max_hours: 72
+    spread_at_min_prob: 0.03           # 3% spread tolerance at NO=0.85
+    spread_at_max_prob: 0.01           # 1% spread tolerance at NO=0.95
+    size_pct: 0.01
+
+  - name: longshot_no_ex_sports
+    side: "NO"
+    min_probability: 0.85
+    max_probability: 0.95
+    min_hours: 2
+    max_hours: 72
+    spread_at_min_prob: 0.03
+    spread_at_max_prob: 0.01
+    size_pct: 0.01
+    excluded_categories:
+      - SPORTS
+
+  - name: longshot_no_ex_crypto
+    side: "NO"
+    min_probability: 0.85
+    max_probability: 0.95
+    min_hours: 2
+    max_hours: 72
+    spread_at_min_prob: 0.03
+    spread_at_max_prob: 0.01
+    size_pct: 0.01
+    excluded_categories:
+      - CRYPTO
