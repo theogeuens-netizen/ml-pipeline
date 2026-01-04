@@ -60,7 +60,7 @@ services:
     volumes:
       - .:/app
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5).raise_for_status()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -175,6 +175,28 @@ services:
       timeout: 15s
       retries: 3
       start_period: 600s  # 10 min warmup before enforcing trade rate
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Unified CSGO Trading Engine
+  # Combines WebSocket + Strategy execution in single process
+  # No Redis streams - direct function calls for reliability
+  # Prices always from csgo_matches table (CLOB API, 15s refresh)
+  csgo-engine:
+    build: .
+    command: python -m src.csgo.engine.unified
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/polymarket_ml
+      - REDIS_URL=redis://redis:6379/0
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
     restart: unless-stopped
     logging: *default-logging
 
