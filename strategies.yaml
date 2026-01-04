@@ -84,6 +84,29 @@ uncertain_zone:
       - SPORTS
 
   # =========================================================================
+  # P0 OPTIMIZATION: Filtered variant excluding underperforming segments
+  # Based on live performance analysis (Jan 2026):
+  # - WEATHER: 0% WR, -$17.65 P&L (4 trades)
+  # - OTHER: 0% WR, -$8.00 P&L (2 trades)
+  # - MAP_WINNER (L3): 46.2% WR, -$15.47 P&L (26 trades) - opposite of series edge
+  # Expected improvement: +$28.47 P&L (+16%)
+  # =========================================================================
+  - name: no_bias_tight_2h_filtered
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    excluded_categories:
+      - CRYPTO
+      - SPORTS
+      - WEATHER      # 0% WR, -$17.65
+      - OTHER        # 0% WR, -$8.00
+    excluded_l3_categories:
+      - MAP_WINNER   # 46.2% WR, -$15.47 (individual map bets have reverse bias)
+    # Analysis: analysis-001 (Jan 2026)
+
+  # =========================================================================
   # GROUP B: Underdog NO (YES 0.55-0.70, so NO is 0.30-0.45)
   # Buy cheap NO tokens expecting them to win more than priced
   # =========================================================================
@@ -134,6 +157,25 @@ uncertain_zone:
     max_hours: 14
     expected_no_rate: 0.55
     max_spread: 0.04               # Only trade if spread <= 4%
+
+  # =========================================================================
+  # P1 OPTIMIZATION: Hourly-only variant for crypto direction
+  # Based on live performance analysis (Jan 2026):
+  # - DIRECTION_HOURLY: $0.33/trade avg, 55.6% WR, 126 trades
+  # - DIRECTION_15MIN:  $0.18/trade avg, 53.8% WR, 292 trades
+  # Hourly has 1.8x better edge per trade than 15-min
+  # Expected Sharpe improvement: +80% per trade (accepts lower volume)
+  # =========================================================================
+  - name: no_bias_tight_12h_hourly
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 12
+    max_hours: 14
+    expected_no_rate: 0.55
+    max_spread: 0.04
+    l3_categories:
+      - DIRECTION_HOURLY   # 1.8x edge vs 15-min; accepts ~30% of crypto volume
+    # Analysis: analysis-001 (Jan 2026)
 
   - name: no_bias_tight_12h_spread2
     yes_price_min: 0.48

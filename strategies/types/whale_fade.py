@@ -20,7 +20,7 @@ class WhaleFadeStrategy(Strategy):
         **kwargs,
     ):
         self.name = name
-        self.version = "2.0.0"
+        self.version = "2.1.0"  # Fixed orderbook conversion for YES/NO
         self.direction = direction
         self.min_whale_volume = min_whale_volume
         self.min_whale_ratio = min_whale_ratio
@@ -82,17 +82,31 @@ class WhaleFadeStrategy(Strategy):
             edge = 0.03 * min(1.5, whale_total / 10000)
             confidence = 0.5 + (ratio - 0.6) * 1.0
 
+            # Convert orderbook based on which token we're buying
+            is_buying_no = (token_id == m.no_token_id)
+            if is_buying_no:
+                # Convert YES orderbook to NO orderbook
+                no_price = 1 - m.price
+                signal_best_bid = (1 - m.best_ask) if m.best_ask is not None else None
+                signal_best_ask = (1 - m.best_bid) if m.best_bid is not None else no_price
+                signal_price = no_price
+            else:
+                # YES token - use YES orderbook directly
+                signal_best_bid = m.best_bid
+                signal_best_ask = m.best_ask if m.best_ask is not None else m.price
+                signal_price = m.price
+
             yield Signal(
                 token_id=token_id,
                 side=Side.BUY,
                 reason=f"Fade {fade_desc}",
                 market_id=m.id,
-                price_at_signal=m.price,
+                price_at_signal=signal_price,
                 edge=edge,
                 confidence=confidence,
                 size_usd=None,
-                best_bid=m.best_bid,
-                best_ask=m.best_ask,
+                best_bid=signal_best_bid,
+                best_ask=signal_best_ask,
                 strategy_name=self.name,
                 strategy_sha=self.get_sha(),
                 market_snapshot=m.snapshot,

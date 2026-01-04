@@ -7,12 +7,22 @@ import {
   PositionsTable,
   TimeRange,
 } from '../components/trading'
-import { useRefreshAnalystData } from '../hooks/useAnalystData'
+import { useRefreshAnalystData, useStrategyBalances } from '../hooks/useAnalystData'
 
 export default function Trading() {
   const [timeRange, setTimeRange] = useState<TimeRange>('30d')
+  const [selectedStrategy, setSelectedStrategy] = useState<string | undefined>(undefined)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const refreshData = useRefreshAnalystData()
+
+  // Get strategies with trades for the dropdown
+  const { data: balancesData } = useStrategyBalances()
+
+  // Filter to strategies that have at least one trade
+  const strategiesWithTrades = balancesData?.strategies
+    ?.filter((s) => s.trade_count > 0)
+    ?.sort((a, b) => (b.realized_pnl + b.unrealized_pnl) - (a.realized_pnl + a.unrealized_pnl))
+    ?.map((s) => s.name) || []
 
   const handleRefresh = () => {
     setIsRefreshing(true)
@@ -40,6 +50,21 @@ export default function Trading() {
         </div>
       </div>
 
+      {/* Strategy Selector for Equity Curve */}
+      <div className="flex items-center gap-2">
+        <span className="text-gray-400 text-sm">Show P&L for:</span>
+        <select
+          value={selectedStrategy || ''}
+          onChange={(e) => setSelectedStrategy(e.target.value || undefined)}
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <option value="">All Strategies (Global)</option>
+          {strategiesWithTrades.map((name: string) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+        </select>
+      </div>
+
       {/* Portfolio Overview KPI Cards */}
       <PortfolioHeader />
 
@@ -47,7 +72,7 @@ export default function Trading() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Equity Curve - Takes 2 columns on XL screens */}
         <div className="xl:col-span-2">
-          <EquityCurve timeRange={timeRange} />
+          <EquityCurve timeRange={timeRange} strategy={selectedStrategy} />
         </div>
 
         {/* Quick Stats Card */}

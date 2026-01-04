@@ -23,7 +23,7 @@ class FlowStrategy(Strategy):
         **kwargs,
     ):
         self.name = name
-        self.version = "2.0.0"
+        self.version = "2.1.0"  # Fixed orderbook conversion for YES/NO
         self.type = type
         self.spike_multiplier = spike_multiplier
         self.min_volume = min_volume
@@ -126,17 +126,31 @@ class FlowStrategy(Strategy):
         return self._make_signal(m, token_id, reason, 0.02, 0.5)
 
     def _make_signal(self, m: MarketData, token_id: str, reason: str, edge: float, conf: float) -> Signal:
+        # Convert orderbook based on which token we're buying
+        is_buying_no = (token_id == m.no_token_id)
+        if is_buying_no:
+            # Convert YES orderbook to NO orderbook
+            no_price = 1 - m.price
+            signal_best_bid = (1 - m.best_ask) if m.best_ask is not None else None
+            signal_best_ask = (1 - m.best_bid) if m.best_bid is not None else no_price
+            signal_price = no_price
+        else:
+            # YES token - use YES orderbook directly
+            signal_best_bid = m.best_bid
+            signal_best_ask = m.best_ask if m.best_ask is not None else m.price
+            signal_price = m.price
+
         return Signal(
             token_id=token_id,
             side=Side.BUY,
             reason=reason,
             market_id=m.id,
-            price_at_signal=m.price,
+            price_at_signal=signal_price,
             edge=edge,
             confidence=conf,
             size_usd=None,
-            best_bid=m.best_bid,
-            best_ask=m.best_ask,
+            best_bid=signal_best_bid,
+            best_ask=signal_best_ask,
             strategy_name=self.name,
             strategy_sha=self.get_sha(),
             market_snapshot=m.snapshot,

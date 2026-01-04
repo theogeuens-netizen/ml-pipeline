@@ -9,10 +9,13 @@ type Tab = 'open' | 'historical'
 type SortField = 'strategy' | 'market' | 'pnl' | 'age' | 'size' | 'closed' | 'duration'
 type SortDirection = 'asc' | 'desc'
 
+const PAGE_SIZE = 20
+
 export default function PositionsTable() {
   const [activeTab, setActiveTab] = useState<Tab>('open')
-  const { data: openPositionsData, isLoading: openLoading } = usePositions({ status: 'open', limit: 500 })
-  const { data: closedPositionsData, isLoading: closedLoading } = usePositions({ status: 'closed', limit: 500 })
+  const [currentPage, setCurrentPage] = useState(0)
+  const { data: openPositionsData, isLoading: openLoading } = usePositions({ status: 'open', limit: 100 })
+  const { data: closedPositionsData, isLoading: closedLoading } = usePositions({ status: 'closed', limit: 100 })
 
   const positionsData = activeTab === 'open' ? openPositionsData : closedPositionsData
   const isLoading = activeTab === 'open' ? openLoading : closedLoading
@@ -23,11 +26,12 @@ export default function PositionsTable() {
   const [sortField, setSortField] = useState<SortField>(activeTab === 'open' ? 'pnl' : 'closed')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
-  // Reset sort when switching tabs
+  // Reset sort and page when switching tabs
   const handleTabChange = (tab: Tab) => {
     setActiveTab(tab)
     setSortField(tab === 'open' ? 'pnl' : 'closed')
     setSortDirection('desc')
+    setCurrentPage(0)
   }
 
   // Get unique strategy names
@@ -93,6 +97,14 @@ export default function PositionsTable() {
       }
     })
   }, [positions, strategyFilter, sortField, sortDirection, activeTab])
+
+  // Paginate the filtered positions
+  const paginatedPositions = useMemo(() => {
+    const start = currentPage * PAGE_SIZE
+    return filteredPositions.slice(start, start + PAGE_SIZE)
+  }, [filteredPositions, currentPage])
+
+  const totalPages = Math.ceil(filteredPositions.length / PAGE_SIZE)
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -259,7 +271,7 @@ export default function PositionsTable() {
                 </tr>
               </thead>
               <tbody className="text-sm">
-                {filteredPositions.map((pos: any) => {
+                {paginatedPositions.map((pos: any) => {
                   const opened = pos.entry_time ? new Date(pos.entry_time) : null
                   const pnlPct = pos.cost_basis > 0
                     ? ((pos.unrealized_pnl ?? 0) / pos.cost_basis) * 100
@@ -354,6 +366,29 @@ export default function PositionsTable() {
               </div>
             </div>
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="p-3 border-t border-gray-700 flex items-center justify-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                disabled={currentPage === 0}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm text-white transition-colors"
+              >
+                Prev
+              </button>
+              <span className="text-gray-400 text-sm px-3">
+                Page {currentPage + 1} of {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                disabled={currentPage >= totalPages - 1}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm text-white transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </>
       ) : (
         /* Historical positions table */
@@ -404,7 +439,7 @@ export default function PositionsTable() {
                 </tr>
               </thead>
               <tbody className="text-sm">
-                {filteredPositions.map((pos: any) => {
+                {paginatedPositions.map((pos: any) => {
                   const entryTime = pos.entry_time ? new Date(pos.entry_time) : null
                   const exitTime = pos.exit_time ? new Date(pos.exit_time) : null
                   const pnlPct = pos.cost_basis > 0
@@ -506,6 +541,29 @@ export default function PositionsTable() {
               </div>
             </div>
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="p-3 border-t border-gray-700 flex items-center justify-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                disabled={currentPage === 0}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm text-white transition-colors"
+              >
+                Prev
+              </button>
+              <span className="text-gray-400 text-sm px-3">
+                Page {currentPage + 1} of {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                disabled={currentPage >= totalPages - 1}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm text-white transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>

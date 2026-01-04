@@ -55,6 +55,16 @@ class PositionSizer:
         Returns:
             Position size in USD
         """
+        # If strategy already provided a fixed size, respect it (skip Kelly/other sizing)
+        if signal.size_usd and signal.size_usd > 0:
+            size = min(signal.size_usd, available_capital)
+            size = max(size, 1.0)  # At least $1
+            logger.debug(
+                f"Using strategy-provided size: ${size:.2f} "
+                f"(requested ${signal.size_usd:.2f}, available ${available_capital:.2f})"
+            )
+            return round(size, 2)
+
         sizing = sizing_config or self.config.get_effective_sizing(signal.strategy_name)
 
         # For Kelly sizing, use strategy_capital as the base for fraction calculation

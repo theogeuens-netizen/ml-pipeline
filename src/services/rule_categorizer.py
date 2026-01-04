@@ -64,12 +64,13 @@ class RuleCategorizer:
                 session.expunge(rule)
 
         # Compile L3 patterns for each rule
+        # Use DOTALL so .* matches across newlines in descriptions
         for rule in self.rules:
             self._compiled_l3_patterns[rule.id] = {}
             if rule.l3_patterns:
                 for l3, patterns in rule.l3_patterns.items():
                     self._compiled_l3_patterns[rule.id][l3] = [
-                        re.compile(p, re.IGNORECASE) for p in patterns
+                        re.compile(p, re.IGNORECASE | re.DOTALL) for p in patterns
                     ]
 
         logger.info("Loaded categorization rules", count=len(self.rules))
@@ -228,7 +229,9 @@ class RuleCategorizer:
         return False
 
     # L3 priority order - more specific patterns first
+    # Order matters: check compound patterns before simple ones
     L3_PRIORITY = [
+        # Crypto time-based (most specific first)
         "DIRECTION_15MIN",
         "DIRECTION_HOURLY",
         "DIRECTION_DAILY",
@@ -237,6 +240,24 @@ class RuleCategorizer:
         "PRICE_RANGE",
         "REACH_TARGET",
         "PRICE_MOVEMENT",
+        # Esports: compound patterns first (require bet type + BO format)
+        "MAPS_TOTAL_BO3",
+        "MAPS_TOTAL_BO5",
+        # Esports: specific bet types (before generic MATCH_WINNER)
+        "MAP_WINNER",
+        "GAME_WINNER",
+        "GAMES_WON",
+        "GAMES_HANDICAP",
+        "MAPS_TOTAL",
+        "TOURNAMENT_WINNER",
+        "WORLDS_WINNER",
+        # Esports: BO-specific match winners (last resort before generic)
+        "MATCH_WINNER_BO1",
+        "MATCH_WINNER_BO3",
+        "MATCH_WINNER_BO5",
+        "MATCH_WINNER_BO7",
+        # Esports: generic fallback
+        "MATCH_WINNER",
     ]
 
     def _detect_l3(self, text: str, rule: CategorizationRule) -> str:

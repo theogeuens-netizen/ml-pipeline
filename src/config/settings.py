@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     websocket_enabled_tiers: list[int] = [2, 3, 4]  # Only T2+ get WS
     websocket_reconnect_delay: float = 5.0
     websocket_max_reconnect_delay: float = 60.0
-    websocket_num_connections: int = 6  # Number of parallel WS connections (500 markets each)
+    websocket_num_connections: int = 10  # Number of parallel WS connections (500 subscriptions each, 2 per market = 2500 markets max)
 
     # ===========================================
     # Application

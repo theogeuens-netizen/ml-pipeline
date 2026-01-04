@@ -49,7 +49,8 @@ class WebSocketCollector:
         """
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.redis = RedisClient()
-        self.subscribed_markets: dict[str, dict] = {}  # condition_id -> {yes_token_id, market_id}
+        self.subscribed_markets: dict[str, dict] = {}  # condition_id -> {yes_token_id, no_token_id, market_id}
+        self.token_to_market: dict[str, dict] = {}  # token_id -> {condition_id, market_id, token_type}
         self.running = False
         self.reconnect_delay = settings.websocket_reconnect_delay
         self._subscription_update_task: Optional[asyncio.Task] = None
@@ -103,14 +104,12 @@ class WebSocketCollector:
                 print("Updating subscriptions...", flush=True)
                 await self._update_subscriptions()
             else:
-                # For managed mode, just subscribe to pre-assigned markets
-                batch = [
-                    (cid, info["yes_token_id"])
-                    for cid, info in self.subscribed_markets.items()
-                ]
-                if batch:
-                    await self._subscribe_batch(batch)
-            print(f"Subscribed to {len(self.subscribed_markets)} markets", flush=True)
+                # For managed mode, build token lookup and subscribe to pre-assigned markets
+                self._build_token_lookup()
+                token_ids = list(self.token_to_market.keys())
+                if token_ids:
+                    await self._subscribe_tokens(token_ids)
+            print(f"Subscribed to {len(self.subscribed_markets)} markets ({len(self.token_to_market)} tokens)", flush=True)
 
             # Start periodic subscription updates (only if not managed)
             if not self.managed:
@@ -215,10 +214,42 @@ class WebSocketCollector:
             except Exception as e:
                 logger.error("Health check failed", error=str(e), connection=self.connection_id)
 
+    def _build_token_lookup(self) -> None:
+        """Build reverse lookup from token_id to market info."""
+        self.token_to_market = {}
+        for cid, info in self.subscribed_markets.items():
+            yes_token = info.get("yes_token_id")
+            no_token = info.get("no_token_id")
+            market_id = info["market_id"]
+
+            if yes_token:
+                self.token_to_market[yes_token] = {
+                    "condition_id": cid,
+                    "market_id": market_id,
+                    "token_type": "YES",
+                }
+            if no_token:
+                self.token_to_market[no_token] = {
+                    "condition_id": cid,
+                    "market_id": market_id,
+                    "token_type": "NO",
+                }
+
+    async def _subscribe_tokens(self, token_ids: list[str]) -> None:
+        """Subscribe to a list of token IDs."""
+        if self.ws and token_ids:
+            message = {
+                "type": "market",
+                "assets_ids": token_ids,
+            }
+            await self.ws.send(json.dumps(message))
+            logger.info("Subscribed to tokens", count=len(token_ids), connection=self.connection_id)
+
     async def _update_subscriptions(self) -> None:
         """Subscribe to markets in T2+ tiers, prioritizing by tier (T4 first).
 
         Polymarket limits WebSocket connections to 500 instruments max.
+        Each market uses 2 slots (YES + NO token), so max ~250 markets per connection.
         We prioritize higher tiers (T4 > T3 > T2) since they need real-time data most.
         """
         with get_session() as session:
@@ -231,66 +262,61 @@ class WebSocketCollector:
                 ).order_by(Market.tier.desc())  # T4 first, then T3, then T2
             ).scalars().all()
 
-            # Limit to MAX_SUBSCRIPTIONS (500) to comply with Polymarket limits
-            if len(markets) > MAX_SUBSCRIPTIONS:
+            # Each market uses 2 subscription slots (YES + NO token)
+            max_markets = MAX_SUBSCRIPTIONS // 2
+            if len(markets) > max_markets:
                 logger.warning(
                     "Limiting WebSocket subscriptions",
                     total_markets=len(markets),
-                    max_allowed=MAX_SUBSCRIPTIONS,
-                    dropped=len(markets) - MAX_SUBSCRIPTIONS,
+                    max_markets=max_markets,
+                    max_tokens=MAX_SUBSCRIPTIONS,
+                    dropped=len(markets) - max_markets,
                 )
-                markets = markets[:MAX_SUBSCRIPTIONS]
+                markets = markets[:max_markets]
 
             new_subscriptions = {
                 m.condition_id: {
                     "yes_token_id": m.yes_token_id,
+                    "no_token_id": m.no_token_id,
                     "market_id": m.id,
                 }
                 for m in markets
             }
 
-        # Unsubscribe from removed markets
+        # Find removed and added markets
         removed = set(self.subscribed_markets.keys()) - set(new_subscriptions.keys())
+        added = set(new_subscriptions.keys()) - set(self.subscribed_markets.keys())
+
+        # Unsubscribe from removed markets (update Redis tracking)
         for cid in removed:
             await self._unsubscribe(cid)
 
-        # Subscribe to new markets (batch for efficiency)
-        added = set(new_subscriptions.keys()) - set(self.subscribed_markets.keys())
-        if added:
-            batch = [(cid, new_subscriptions[cid]["yes_token_id"]) for cid in added]
-            await self._subscribe_batch(batch)
-
+        # Update subscribed_markets and rebuild token lookup
         self.subscribed_markets = new_subscriptions
+        self._build_token_lookup()
+
+        # Subscribe to new tokens
+        if added:
+            new_tokens = []
+            for cid in added:
+                info = new_subscriptions[cid]
+                if info.get("yes_token_id"):
+                    new_tokens.append(info["yes_token_id"])
+                if info.get("no_token_id"):
+                    new_tokens.append(info["no_token_id"])
+            if new_tokens:
+                await self._subscribe_tokens(new_tokens)
+                # Update Redis tracking for connected markets
+                for cid in added:
+                    await self.redis.set_ws_connected(cid, True)
+
         logger.info(
             "Subscriptions updated",
-            total=len(self.subscribed_markets),
+            total_markets=len(self.subscribed_markets),
+            total_tokens=len(self.token_to_market),
             added=len(added),
             removed=len(removed),
         )
-
-    async def _subscribe_batch(self, markets: list[tuple[str, str]]) -> None:
-        """Subscribe to multiple markets at once (more efficient)."""
-        if self.ws and markets:
-            token_ids = [token_id for _, token_id in markets]
-            message = {
-                "type": "market",
-                "assets_ids": token_ids,
-            }
-            await self.ws.send(json.dumps(message))
-            for condition_id, _ in markets:
-                await self.redis.set_ws_connected(condition_id, True)
-            logger.info("Batch subscribed to markets", count=len(markets))
-
-    async def _subscribe(self, condition_id: str, token_id: str) -> None:
-        """Subscribe to a market's trade feed."""
-        if self.ws:
-            message = {
-                "type": "market",
-                "assets_ids": [token_id],
-            }
-            await self.ws.send(json.dumps(message))
-            await self.redis.set_ws_connected(condition_id, True)
-            logger.debug("Subscribed to market", condition_id=condition_id[:20])
 
     async def _unsubscribe(self, condition_id: str) -> None:
         """Unsubscribe from a market."""
@@ -365,26 +391,21 @@ class WebSocketCollector:
         - Size is positive
         - Side is valid (BUY/SELL)
         """
-        # Get market info from asset ID
+        # Get market info from asset ID using reverse lookup
         asset_id = data.get("asset_id")
         if not asset_id:
             logger.debug("Trade event missing asset_id")
             return
 
-        # Find market by token ID
-        market_info = None
-        condition_id = None
-        for cid, info in self.subscribed_markets.items():
-            if info["yes_token_id"] == asset_id:
-                market_info = info
-                condition_id = cid
-                break
-
-        if not market_info:
+        # Fast O(1) lookup using token_to_market dict
+        token_info = self.token_to_market.get(asset_id)
+        if not token_info:
             # Unknown asset ID - could be unsubscribed market
             return
 
-        market_id = market_info["market_id"]
+        condition_id = token_info["condition_id"]
+        market_id = token_info["market_id"]
+        token_type = token_info["token_type"]  # "YES" or "NO"
 
         # Parse and validate trade data
         timestamp = datetime.now(timezone.utc)
@@ -436,6 +457,7 @@ class WebSocketCollector:
                     price=price,
                     size=size,
                     side=side,
+                    token_type=token_type,
                     whale_tier=whale_tier,
                 )
                 session.add(trade)
@@ -507,14 +529,10 @@ class WebSocketCollector:
         if not asset_id:
             return
 
-        # Find condition_id by token ID
-        condition_id = None
-        for cid, info in self.subscribed_markets.items():
-            if info["yes_token_id"] == asset_id:
-                condition_id = cid
-                break
-
-        if condition_id:
+        # Fast O(1) lookup using token_to_market dict
+        token_info = self.token_to_market.get(asset_id)
+        if token_info:
+            condition_id = token_info["condition_id"]
             # Cache orderbook in Redis
             orderbook = {
                 "bids": data.get("buys", []),
@@ -531,11 +549,10 @@ class WebSocketCollector:
         if not asset_id or price is None:
             return
 
-        # Find condition_id and cache price
-        for cid, info in self.subscribed_markets.items():
-            if info["yes_token_id"] == asset_id:
-                await self.redis.set_price(cid, float(price))
-                break
+        # Fast O(1) lookup using token_to_market dict
+        token_info = self.token_to_market.get(asset_id)
+        if token_info:
+            await self.redis.set_price(token_info["condition_id"], float(price))
 
     def _classify_whale(self, size: float) -> int:
         """
@@ -567,6 +584,7 @@ class MultiConnectionCollector:
 
     Polymarket limits each connection to 500 instruments, so we split markets
     across multiple connections, prioritizing by tier (T4 > T3 > T2).
+    Each market uses 2 subscription slots (YES + NO token).
     """
 
     def __init__(self, num_connections: int = 2):
@@ -577,10 +595,13 @@ class MultiConnectionCollector:
     async def start(self) -> None:
         """Start all WebSocket collectors in parallel."""
         self.running = True
+        # Each market uses 2 slots (YES + NO token)
+        max_markets = (self.num_connections * MAX_SUBSCRIPTIONS) // 2
         logger.info(
             "Starting multi-connection collector",
             num_connections=self.num_connections,
-            max_markets=self.num_connections * MAX_SUBSCRIPTIONS,
+            max_tokens=self.num_connections * MAX_SUBSCRIPTIONS,
+            max_markets=max_markets,
         )
 
         # Clear stale entries from Redis ws:connected set
@@ -661,7 +682,11 @@ class MultiConnectionCollector:
                 )
 
     async def _assign_markets_to_connections(self) -> None:
-        """Split markets across connections, prioritizing by tier."""
+        """Split markets across connections, prioritizing by tier.
+
+        Each market uses 2 subscription slots (YES + NO token), so max markets
+        per connection is MAX_SUBSCRIPTIONS // 2.
+        """
         # Extract data within session to avoid detached instance errors
         with get_session() as session:
             markets = session.execute(
@@ -673,49 +698,63 @@ class MultiConnectionCollector:
                 ).order_by(Market.tier.desc())  # T4 first
             ).scalars().all()
 
-            # Extract data while session is active
+            # Extract data while session is active (include both token IDs)
             market_data = [
                 {
                     "condition_id": m.condition_id,
                     "yes_token_id": m.yes_token_id,
+                    "no_token_id": m.no_token_id,
                     "market_id": m.id,
                 }
                 for m in markets
             ]
 
-        total_capacity = self.num_connections * MAX_SUBSCRIPTIONS
-        if len(market_data) > total_capacity:
+        # Each market uses 2 slots (YES + NO token)
+        total_token_capacity = self.num_connections * MAX_SUBSCRIPTIONS
+        max_markets = total_token_capacity // 2
+
+        if len(market_data) > max_markets:
             logger.warning(
                 "Markets exceed total capacity",
                 total_markets=len(market_data),
-                total_capacity=total_capacity,
-                dropped=len(market_data) - total_capacity,
+                max_markets=max_markets,
+                total_tokens=total_token_capacity,
+                dropped=len(market_data) - max_markets,
             )
-            market_data = market_data[:total_capacity]
+            market_data = market_data[:max_markets]
+
+        # Calculate max markets per connection (2 tokens per market)
+        max_markets_per_conn = MAX_SUBSCRIPTIONS // 2
 
         # Distribute markets evenly across connections (round-robin for better balance)
         # This ensures each connection gets a mix of tiers rather than one getting all T4
         markets_per_connection: list[list[dict]] = [[] for _ in range(self.num_connections)]
         for idx, market in enumerate(market_data):
             conn_idx = idx % self.num_connections
-            if len(markets_per_connection[conn_idx]) < MAX_SUBSCRIPTIONS:
+            if len(markets_per_connection[conn_idx]) < max_markets_per_conn:
                 markets_per_connection[conn_idx].append(market)
 
         for i, collector in enumerate(self.collectors):
             assigned = markets_per_connection[i]
 
+            # Include both YES and NO token IDs
             collector.subscribed_markets = {
                 m["condition_id"]: {
                     "yes_token_id": m["yes_token_id"],
+                    "no_token_id": m["no_token_id"],
                     "market_id": m["market_id"],
                 }
                 for m in assigned
             }
 
+            # Build token lookup for this collector
+            collector._build_token_lookup()
+
             logger.info(
                 "Assigned markets to connection",
                 connection=i,
-                count=len(assigned),
+                markets=len(assigned),
+                tokens=len(collector.token_to_market),
             )
 
     async def _reassignment_loop(self) -> None:
@@ -742,21 +781,29 @@ class MultiConnectionCollector:
                         for cid in removed:
                             await collector._unsubscribe(cid)
 
-                        # Subscribe to new markets only
+                        # Subscribe to new markets (both YES and NO tokens)
                         added = new_subs - old_subs
                         if added:
-                            batch = [
-                                (cid, collector.subscribed_markets[cid]["yes_token_id"])
-                                for cid in added
-                            ]
-                            await collector._subscribe_batch(batch)
+                            new_tokens = []
+                            for cid in added:
+                                info = collector.subscribed_markets[cid]
+                                if info.get("yes_token_id"):
+                                    new_tokens.append(info["yes_token_id"])
+                                if info.get("no_token_id"):
+                                    new_tokens.append(info["no_token_id"])
+                            if new_tokens:
+                                await collector._subscribe_tokens(new_tokens)
+                                # Update Redis tracking
+                                for cid in added:
+                                    await collector.redis.set_ws_connected(cid, True)
 
                         logger.info(
                             "Reassignment complete",
                             connection=i,
-                            added=len(added),
-                            removed=len(removed),
-                            total=len(new_subs),
+                            added_markets=len(added),
+                            removed_markets=len(removed),
+                            total_markets=len(new_subs),
+                            total_tokens=len(collector.token_to_market),
                         )
             except Exception as e:
                 logger.error("Market reassignment failed", error=str(e))
@@ -770,8 +817,8 @@ class MultiConnectionCollector:
 
 async def run_collector() -> None:
     """Entry point for WebSocket collector service."""
-    # Use multi-connection collector to handle >500 markets
-    # 4 connections = 2000 market capacity (configurable via settings)
+    # Use multi-connection collector to handle many markets
+    # 10 connections * 500 subscriptions = 5000 tokens = 2500 markets (2 tokens per market)
     collector = MultiConnectionCollector(num_connections=settings.websocket_num_connections)
 
     # Handle shutdown signals

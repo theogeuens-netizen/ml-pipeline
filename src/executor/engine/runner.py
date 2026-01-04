@@ -405,19 +405,23 @@ class ExecutorRunner:
         """
         for signal, signal_model, decision in approved_signals:
             try:
-                # Final duplicate guard: skip if position already exists for this strategy/market
+                # Final duplicate guard: skip if position already exists for this strategy/market/token
+                # (but allow hedges which buy the opposite token)
                 existing = self.position_manager.get_position_by_market(
                     signal.market_id, db, strategy_name=signal.strategy_name
                 )
-                if existing is not None:
-                    msg = (
-                        f"Position already open for {signal.strategy_name} on market {signal.market_id}"
-                    )
-                    signal_model.status = SignalStatus.REJECTED.value
-                    signal_model.status_reason = msg
-                    decision.rejected_reason = msg
-                    logger.info(msg)
-                    continue
+                is_hedge = getattr(signal, 'is_hedge', False)
+                if existing is not None and not is_hedge:
+                    # For non-hedge signals, check if same token
+                    if existing.token_id == signal.token_id:
+                        msg = (
+                            f"Position already open for {signal.strategy_name} on market {signal.market_id}"
+                        )
+                        signal_model.status = SignalStatus.REJECTED.value
+                        signal_model.status_reason = msg
+                        decision.rejected_reason = msg
+                        logger.info(msg)
+                        continue
 
                 # Get real orderbook depth from market data
                 bid_depth, ask_depth = market_depth_map.get(
@@ -437,6 +441,10 @@ class ExecutorRunner:
 
                 # Get execution config
                 execution_config = self.config.get_effective_execution(signal.strategy_name)
+
+                # Copy hedge info from dataclass signal to model
+                signal_model.is_hedge = getattr(signal, 'is_hedge', False)
+                signal_model.hedge_position_id = getattr(signal, 'hedge_position_id', None)
 
                 # Execute via paper executor
                 result = self.paper_executor.execute_signal(

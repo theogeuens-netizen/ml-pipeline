@@ -73,10 +73,13 @@ class GammaClient(BaseClient):
         - MAX_PAGES limit prevents infinite loops
         - Empty response breaks pagination
         - Logs progress for monitoring
+        - Per-page delay to avoid 429 rate limits
 
         Returns:
             List of all active market dictionaries
         """
+        import asyncio
+
         all_markets = []
         offset = 0
         limit = 100
@@ -102,6 +105,9 @@ class GammaClient(BaseClient):
                 break
 
             logger.debug("Fetched markets page", page=page, offset=offset, count=len(markets))
+
+            # Small delay between pages to avoid 429 rate limits
+            await asyncio.sleep(0.15)
 
         if page >= MAX_PAGES:
             logger.warning(

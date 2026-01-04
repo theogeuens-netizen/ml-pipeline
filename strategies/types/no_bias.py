@@ -20,7 +20,7 @@ class NoBiasStrategy(Strategy):
         **kwargs,
     ):
         self.name = name
-        self.version = "2.0.0"
+        self.version = "2.1.0"  # Fixed NO orderbook conversion
         self.category = category
         self.historical_no_rate = historical_no_rate
         self.min_hours = min_hours
@@ -61,17 +61,23 @@ class NoBiasStrategy(Strategy):
             # Confidence scales with time to expiry
             confidence = 0.4 + (0.2 * (1 - m.hours_to_close / self.max_hours))
 
+            # Convert YES orderbook to NO orderbook for correct execution pricing
+            # NO bid = 1 - YES ask, NO ask = 1 - YES bid
+            # Use no_price as fallback for NO ask (since we BUY NO tokens)
+            no_best_bid = (1 - m.best_ask) if m.best_ask is not None else None
+            no_best_ask = (1 - m.best_bid) if m.best_bid is not None else no_price
+
             yield Signal(
                 token_id=m.no_token_id,
                 side=Side.BUY,
                 reason=f"{self.category} NO: {no_price:.1%} vs historical {self.historical_no_rate:.1%}",
                 market_id=m.id,
-                price_at_signal=m.price,
+                price_at_signal=no_price,  # NO price, not YES price
                 edge=edge,
                 confidence=confidence,
                 size_usd=None,
-                best_bid=m.best_bid,
-                best_ask=m.best_ask,
+                best_bid=no_best_bid,
+                best_ask=no_best_ask,
                 strategy_name=self.name,
                 strategy_sha=self.get_sha(),
                 market_snapshot=m.snapshot,

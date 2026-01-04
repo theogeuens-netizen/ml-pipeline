@@ -209,14 +209,16 @@ class PaperExecutor:
             db = get_session().__enter__()
 
         try:
-            # Safety: avoid duplicate positions for the same strategy/market
+            # Safety: avoid duplicate positions for the same strategy/market/token
+            # (but allow hedges which buy the opposite token)
             existing = db.query(Position).filter(
                 Position.is_paper == True,
                 Position.status == PositionStatus.OPEN.value,
                 Position.strategy_name == signal.strategy_name,
                 Position.market_id == signal.market_id,
+                Position.token_id == signal.token_id,  # Check specific token, not just market
             ).first()
-            if existing:
+            if existing and not getattr(signal, 'is_hedge', False):
                 return OrderResult(
                     success=False,
                     message=f"Position already open for {signal.strategy_name} on market {signal.market_id}",
@@ -365,6 +367,10 @@ class PaperExecutor:
         """
         now = datetime.now(timezone.utc)
 
+        # Check if this is a hedge signal
+        is_hedge = getattr(signal, 'is_hedge', False)
+        hedge_position_id = getattr(signal, 'hedge_position_id', None)
+
         position = Position(
             is_paper=True,
             strategy_name=signal.strategy_name,
@@ -379,6 +385,8 @@ class PaperExecutor:
             current_price=fill_price,
             current_value=cost,
             status=PositionStatus.OPEN.value,
+            is_hedge=is_hedge,
+            hedge_position_id=hedge_position_id,
         )
         db.add(position)
         db.flush()

@@ -12,6 +12,7 @@ Tables:
 """
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
@@ -226,6 +227,7 @@ class Trade(Base):
     price: Mapped[float] = mapped_column(Numeric(10, 6))
     size: Mapped[float] = mapped_column(Numeric(20, 2))
     side: Mapped[str] = mapped_column(String(4))  # BUY/SELL
+    token_type: Mapped[str] = mapped_column(String(3), default="YES", index=True)  # YES/NO
 
     whale_tier: Mapped[int] = mapped_column(SmallInteger, default=0)  # 0/1/2/3
 
@@ -542,3 +544,172 @@ class HistoricalPriceSnapshot(Base):
 # Alias for backwards compatibility with data.py imports
 HistoricalMarketModel = HistoricalMarket
 HistoricalPriceSnapshotModel = HistoricalPriceSnapshot
+
+
+# ============================================================================
+# CS:GO STRATEGY DATA MODELS
+# ============================================================================
+# Team performance data for the CS:GO volatility hedge strategy.
+# ============================================================================
+
+
+class CSGOTeam(Base):
+    """
+    CS:GO team statistics from historical match data.
+
+    Used by CSGOVolatilityStrategy to calculate win rate differentials
+    and determine position sizing based on signal strength.
+
+    Data source: /home/theo/futarchy/csgo_team_leaderboard.csv
+    """
+    __tablename__ = "csgo_teams"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team_name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    total_matches: Mapped[int] = mapped_column(Integer, default=0)
+    win_rate_pct: Mapped[float] = mapped_column(Numeric(5, 2))
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CSGOH2H(Base):
+    """
+    Head-to-head records between CS:GO teams.
+
+    Normalized so that team1_name < team2_name alphabetically
+    to avoid duplicate entries.
+
+    Data source: /home/theo/futarchy/csgo_h2h_matrix.csv
+    """
+    __tablename__ = "csgo_h2h"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team1_name: Mapped[str] = mapped_column(String(100), index=True)
+    team2_name: Mapped[str] = mapped_column(String(100), index=True)
+    team1_wins: Mapped[int] = mapped_column(Integer, default=0)
+    team2_wins: Mapped[int] = mapped_column(Integer, default=0)
+    total_matches: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # Unique constraint on team pair
+        {"sqlite_autoincrement": True},
+    )
+
+
+class CSGOMatch(Base):
+    """
+    CS:GO match metadata for real-time trading pipeline.
+
+    Populated from Gamma API with game start times, team names,
+    and tournament info. Supports manual override of game_start_time
+    for strategy triggers.
+
+    Used by:
+    - CSGOWebSocketCollector: Subscribe to markets within 6h of game start
+    - CSGOMomentumStrategy: Entry at game start
+    - CSGOLongshotStrategy: Entry on price spikes
+    """
+    __tablename__ = "csgo_matches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market_id: Mapped[int] = mapped_column(ForeignKey("markets.id"), index=True)
+    gamma_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    condition_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+
+    # Team names from Gamma API outcomes field
+    team_yes: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    team_no: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+
+    # Game timing
+    game_start_time: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    game_start_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Match metadata
+    tournament: Mapped[Optional[str]] = mapped_column(String(255))
+    format: Mapped[Optional[str]] = mapped_column(String(20))  # BO1, BO3, BO5
+    market_type: Mapped[Optional[str]] = mapped_column(String(50))  # moneyline, child_moneyline
+    group_item_title: Mapped[Optional[str]] = mapped_column(String(100))  # Match Winner, Map 1 Winner
+    game_id: Mapped[Optional[str]] = mapped_column(String(50))  # External reference
+    map_number: Mapped[Optional[int]] = mapped_column(Integer)  # 1, 2, 3 for map winners; None for series
+
+    # State
+    subscribed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+    # Market lifecycle (CSGO-independent, not relying on markets table)
+    closed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    accepting_orders: Mapped[bool] = mapped_column(Boolean, default=True)
+    outcome: Mapped[Optional[str]] = mapped_column(String(100))  # Winning team name
+    last_status_check: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Market data (refreshed by status poller)
+    yes_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    no_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    spread: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    volume_total: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 2))
+    volume_24h: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 2))
+    liquidity: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 2))
+
+    # Full Gamma API response
+    gamma_data: Mapped[Optional[dict]] = mapped_column(JSONB)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Relationship
+    market: Mapped["Market"] = relationship()
+
+
+class CSGOPriceTick(Base):
+    """
+    High-frequency price data from CSGO websocket.
+
+    Stores every trade, book update, and price change event.
+    Used for:
+    - 5-second OHLC bar aggregation for charts
+    - Real-time price monitoring
+
+    Retention: 7 days (cleaned up by daily task)
+    """
+    __tablename__ = "csgo_price_ticks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    token_type: Mapped[str] = mapped_column(String(3), nullable=False)  # YES or NO
+    event_type: Mapped[str] = mapped_column(String(20), nullable=False)  # trade, book, price_change
+
+    # Price data
+    price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    best_bid: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    best_ask: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    spread: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+
+    # Trade data (for trade events)
+    trade_size: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 6))
+    trade_side: Mapped[Optional[str]] = mapped_column(String(4))  # BUY or SELL
+
+    # Calculated metrics
+    price_velocity_1m: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))

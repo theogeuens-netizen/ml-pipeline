@@ -137,15 +137,23 @@ class RiskManager:
 
         # Check 2: Already have position in this market FOR THIS STRATEGY
         # Strategy isolation: each strategy can independently hold positions
-        # Only block if the SAME strategy already has a position in this market
+        # Only block if the SAME strategy already has a position on the SAME TOKEN
+        # This allows: hedging, opposite-side entries, changed market conditions
         existing = self.position_manager.get_position_by_market(
             signal.market_id, db, strategy_name=strategy_name
         )
         if existing is not None:
-            return RiskCheckResult(
-                approved=False,
-                reason=f"Strategy {strategy_name} already has position in market {signal.market_id}",
-            )
+            # Allow if it's a different token (opposite side of the market)
+            if existing.token_id != signal.token_id:
+                logger.info(
+                    f"Allowing opposite-side position for {strategy_name} in market {signal.market_id} "
+                    f"(existing: {existing.token_id[:8]}..., new: {signal.token_id[:8]}...)"
+                )
+            else:
+                return RiskCheckResult(
+                    approved=False,
+                    reason=f"Strategy {strategy_name} already has position on this token in market {signal.market_id}",
+                )
 
         # Check 3: Total exposure limit (global)
         current_exposure = self.position_manager.get_total_exposure(db)

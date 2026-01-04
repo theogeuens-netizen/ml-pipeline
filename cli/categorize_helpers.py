@@ -177,6 +177,7 @@ def save_categories(results: list[dict]) -> int:
                     category_l2=l2,
                     category_l3=l3,
                     categorization_method="claude",
+                    matched_rule_id=None,  # Clear rule association when Claude categorizes
                     categorized_at=datetime.now(timezone.utc),
                 )
             )

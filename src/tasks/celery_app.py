@@ -65,6 +65,7 @@ app.conf.update(
         "src.tasks.discovery.*": {"queue": "discovery"},
         "src.tasks.categorization.*": {"queue": "categorization"},
         "src.tasks.news.*": {"queue": "default"},
+        "src.csgo.tasks.*": {"queue": "discovery"},  # Route CSGO tasks to discovery queue
     },
     # Default queue
     task_default_queue="default",
@@ -148,6 +149,38 @@ app.conf.beat_schedule = {
         "task": "src.tasks.news.fetch_marketaux_news",
         "schedule": crontab(minute="*/15"),  # Every 15 minutes
     },
+    # === CS:GO PIPELINE ===
+    # Sync CS:GO markets to csgo_matches table every 10 minutes
+    "sync-csgo-markets": {
+        "task": "src.csgo.tasks.sync_csgo_markets",
+        "schedule": crontab(minute="*/10"),
+    },
+    # Enrich new CS:GO matches with Gamma API data every 10 minutes
+    "enrich-csgo-matches": {
+        "task": "src.csgo.tasks.enrich_csgo_matches",
+        "schedule": crontab(minute="2,12,22,32,42,52"),  # Offset by 2 min from sync
+    },
+    # Refresh game start times for upcoming matches every 30 minutes
+    "refresh-csgo-game-times": {
+        "task": "src.csgo.tasks.refresh_csgo_game_times",
+        "schedule": crontab(minute="5,35"),  # At :05 and :35
+    },
+    # Poll market status for in-play/upcoming matches (critical for lifecycle)
+    # This is CSGO-specific and uses its own Gamma API calls (separate from main pipeline)
+    "poll-csgo-market-status": {
+        "task": "src.csgo.tasks.poll_csgo_market_status",
+        "schedule": 5.0,  # Every 5 seconds for near real-time prices
+    },
+    # Refresh volume/liquidity for upcoming matches every 5 minutes
+    "refresh-csgo-volume": {
+        "task": "src.csgo.tasks.refresh_csgo_volume",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    # Clean up old csgo_price_ticks daily (7-day retention)
+    "cleanup-csgo-price-ticks": {
+        "task": "src.csgo.tasks.cleanup_csgo_price_ticks",
+        "schedule": crontab(hour=4, minute=0),  # Daily at 4:00 AM UTC
+    },
     # === SNAPSHOT TASKS ===
     # Tier 0: > 48h to resolution, hourly snapshots
     "snapshot-tier-0": {
@@ -192,7 +225,8 @@ app.conf.beat_schedule = {
 }
 
 # Import tasks to register them with Celery
-app.autodiscover_tasks(["src.tasks"])
+app.autodiscover_tasks(["src.tasks", "src.csgo"])
 
 # Explicitly import to ensure registration
 from src.tasks import discovery, snapshots, alerts, categorization, news  # noqa: F401, E402
+from src.csgo import tasks as csgo_tasks  # noqa: F401, E402

@@ -12,7 +12,7 @@ settings:
 # Risk management limits
 risk:
   max_position_usd: 100          # Max $100 per position (Kelly cap)
-  max_total_exposure_usd: 3200   # 8 strategies × $400 each
+  max_total_exposure_usd: 100000 # Effectively disabled
   max_positions_per_strategy: 40 # Cap per strategy to prevent crowding one book
   max_positions: 0               # Global cap disabled (per-strategy caps enforced)
   max_drawdown_pct: 1.0          # Disabled (100% = no limit)

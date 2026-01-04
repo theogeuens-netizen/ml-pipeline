@@ -24,7 +24,7 @@ class LongshotStrategy(Strategy):
         **kwargs,
     ):
         self.name = name
-        self.version = "2.2.1"  # Fixed NO orderbook conversion
+        self.version = "2.3.0"  # Fixed NO orderbook conversion when bid is missing
         self.side = side
         self.min_probability = min_probability
         self.max_probability = max_probability
@@ -99,12 +99,14 @@ class LongshotStrategy(Strategy):
             # Convert orderbook for NO tokens (like uncertain_zone does)
             # YES orderbook: bid/ask are for YES tokens
             # NO orderbook: bid = 1 - YES_ask, ask = 1 - YES_bid
-            if self.side == "NO" and m.best_bid is not None and m.best_ask is not None:
-                signal_best_bid = 1 - m.best_ask  # NO bid
-                signal_best_ask = 1 - m.best_bid  # NO ask
+            if self.side == "NO":
+                # Convert each price individually if available
+                # Use execution_price as fallback for NO ask (since we BUY NO tokens)
+                signal_best_bid = (1 - m.best_ask) if m.best_ask is not None else None
+                signal_best_ask = (1 - m.best_bid) if m.best_bid is not None else execution_price
             else:
                 signal_best_bid = m.best_bid
-                signal_best_ask = m.best_ask
+                signal_best_ask = m.best_ask if m.best_ask is not None else execution_price
 
             yield Signal(
                 token_id=token_id,

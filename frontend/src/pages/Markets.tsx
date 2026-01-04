@@ -1,7 +1,19 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useMarkets } from '../hooks/useData'
 import { formatDistanceToNow } from 'date-fns'
+
+// Debounce hook
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+
+  return debouncedValue
+}
 
 export default function Markets() {
   const [tier, setTier] = useState<number | undefined>(undefined)
@@ -9,11 +21,19 @@ export default function Markets() {
   const [page, setPage] = useState(0)
   const limit = 20
 
+  // Debounce search by 300ms to avoid API calls on every keystroke
+  const debouncedSearch = useDebounce(search, 300)
+
+  // Reset page when debounced search changes
+  useEffect(() => {
+    setPage(0)
+  }, [debouncedSearch])
+
   const { data, isLoading } = useMarkets({
     tier,
     active: true,
     resolved: false,
-    search: search || undefined,
+    search: debouncedSearch || undefined,
     limit,
     offset: page * limit,
   })
@@ -46,10 +66,7 @@ export default function Markets() {
           type="text"
           placeholder="Search markets..."
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value)
-            setPage(0)
-          }}
+          onChange={(e) => setSearch(e.target.value)}
           className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-300 w-64"
         />
 

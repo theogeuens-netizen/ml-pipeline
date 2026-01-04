@@ -50,18 +50,18 @@ Strategy:
 
 ---
 
-## Current System Stats (Dec 18, 2024)
+## Current System Stats (Dec 26, 2024)
 
 | Metric | Value |
 |--------|-------|
-| Markets tracked | **9,269** |
-| Snapshots collected | **1,148,567** |
-| Trades collected | **75,938** |
-| Orderbook snapshots | **494,959** |
-| Task success rate | **99.1%** |
+| Markets tracked | **25,031** |
+| Snapshots collected | **18.5M** |
+| Trades collected | **987K+** |
+| Orderbook snapshots | **13.5M** |
+| Task success rate | **100%** |
 | WebSocket status | **HEALTHY** |
-| Trades per minute | **~380** (was ~10 before 4-connection fix) |
-| WebSocket connections | **4 parallel** (2000 market capacity) |
+| Trades per minute | **~380** (capturing both YES + NO tokens) |
+| WebSocket connections | **10 parallel** (2500 market capacity) |
 
 ---
 
@@ -73,7 +73,8 @@ Current settings (`src/config/settings.py`):
 - **Orderbook concurrency**: 100 parallel fetches
 - **Metrics concurrency**: 150 parallel fetches
 - **WebSocket enabled tiers**: T2, T3, T4
-- **WebSocket connections**: 4 parallel (configurable via `websocket_num_connections`)
+- **WebSocket connections**: 10 parallel (500 tokens each = 2500 markets max)
+- **Token subscription**: Both YES + NO tokens per market
 - **Orderbook enabled tiers**: T2, T3, T4
 
 ---
@@ -131,6 +132,7 @@ docker-compose ps
 | `src/tasks/alerts.py` | Daily summary Celery task |
 | `.claude/commands/trading.md` | Trading CLI slash command |
 | `.claude/commands/categorize.md` | Categorization slash command |
+| `.claude/commands/csgotrader.md` | CSGO strategy advisor slash command |
 | `.claude/commands/hypothesis.md` | Strategy hypothesis generation |
 | `.claude/commands/test.md` | Backtest with robustness checks |
 | `.claude/commands/verdict.md` | Experiment verdict and ledger update |
@@ -523,6 +525,45 @@ Major audit and hardening to make pipeline production-grade for autonomous opera
 
 ---
 
+### Session 11 - Dec 26, 2024 (Dual-Token WebSocket + Capacity Increase)
+**Goal**: Capture trades from both YES and NO tokens, increase connection capacity
+
+**Problem Identified**:
+- Only subscribing to YES token trades, missing ~50% of volume
+- BUY/SELL ratio was 4:1 (abnormal for prediction markets)
+- Only ~26% of total Polymarket volume being captured
+
+**Changes Made**:
+
+**Settings** (`src/config/settings.py`):
+- Increased `websocket_num_connections` from 6 to 10 (5000 token capacity)
+
+**WebSocket Collector** (`src/collectors/websocket.py`):
+- Added `token_to_market` reverse lookup dict for O(1) trade handling
+- `subscribed_markets` now includes both `yes_token_id` and `no_token_id`
+- New `_build_token_lookup()` method builds token→market mapping
+- New `_subscribe_tokens()` method for batch token subscription
+- Updated all handlers to use fast O(1) lookup instead of iteration
+- Each market now uses 2 subscription slots (YES + NO)
+- Capacity: 10 connections × 500 tokens = 5000 tokens = 2500 markets max
+
+**Database Schema**:
+- Added `token_type` column to `trades` table (VARCHAR(3): 'YES' or 'NO')
+- Indexed for efficient filtering
+
+**Trade Model** (`src/db/models.py`):
+- Added `token_type` field to Trade model
+
+**Results**:
+- Trade capture rate: 236/min → 380/min (**+61%**)
+- Now capturing both YES and NO token trades
+- Token type stored for each trade (enables proper analysis)
+- All 854 T2-T4 markets covered with 1,710 tokens
+- Zero duplicate trades, zero invalid data
+- Room for growth: only using 1,710 of 5,000 token capacity
+
+---
+
 ## Monitoring Endpoints
 
 | Endpoint | Purpose |
@@ -698,6 +739,39 @@ CRYPTO, SPORTS, ESPORTS, POLITICS, ECONOMICS, BUSINESS, ENTERTAINMENT, WEATHER, 
 - `.claude/commands/categorize.md` - Full command reference
 - `src/services/rule_categorizer.py` - Rule engine
 - `cli/categorize_helpers.py` - CLI helper functions
+
+---
+
+### `/csgotrader` - CSGO Strategy Advisor
+
+Design and implement CSGO trading strategies for the event-driven engine.
+
+**Capabilities:**
+- Design entry/exit logic for in-play CSGO trading
+- Position sizing (fixed, linear scaling, Kelly)
+- Hedging strategies (favorite hedge, spread trading)
+- Filter configuration (BO3/BO5, spread limits, timing)
+
+**Example session:**
+```
+> /csgotrader
+> I want a strategy that fades big trades on underdogs
+
+[Claude asks about trade size threshold, price range, sizing, etc.]
+[Claude implements the strategy]
+```
+
+**Key features the advisor knows:**
+- Tick data: prices, spreads, trade sizes, game timing
+- Action types: OPEN_LONG, OPEN_SPREAD, CLOSE, PARTIAL_CLOSE, ADD
+- Filters: formats (BO1/BO3/BO5), market_types, spread limits
+- Timing: `minutes_since_start`, `is_in_play`
+- State: position tracking, hedge triggers
+
+**Key files:**
+- `.claude/commands/csgotrader.md` - Full advisor reference
+- `src/csgo/engine/strategy.py` - Base strategy class
+- `src/csgo/strategies/` - Example implementations
 
 ---
 

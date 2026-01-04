@@ -25,7 +25,7 @@ export function useExecutorStatus() {
   return useQuery({
     queryKey: keys.status,
     queryFn: api.getExecutorStatus,
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   })
 }
 
@@ -43,7 +43,7 @@ export function usePositions(params?: Parameters<typeof api.getPositions>[0]) {
   return useQuery({
     queryKey: keys.positions(params),
     queryFn: () => api.getPositions(params),
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   })
 }
 
@@ -52,7 +52,7 @@ export function useSignals(params?: Parameters<typeof api.getSignals>[0]) {
   return useQuery({
     queryKey: keys.signals(params),
     queryFn: () => api.getSignals(params),
-    refetchInterval: 3000,
+    refetchInterval: 30000,
   })
 }
 
@@ -61,7 +61,7 @@ export function useTrades(params?: Parameters<typeof api.getTrades>[0]) {
   return useQuery({
     queryKey: keys.trades(params),
     queryFn: () => api.getTrades(params),
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   })
 }
 

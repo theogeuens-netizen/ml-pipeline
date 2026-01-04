@@ -117,6 +117,10 @@ class Signal:
     market_snapshot: dict = field(default_factory=dict)
     decision_inputs: dict = field(default_factory=dict)
 
+    # Hedge-related fields
+    is_hedge: bool = False
+    hedge_position_id: Optional[int] = None
+
     # Metadata
     created_at: datetime = field(default_factory=datetime.utcnow)
 

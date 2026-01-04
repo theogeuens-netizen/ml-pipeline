@@ -992,15 +992,16 @@ def cleanup_stale_markets() -> dict:
 @shared_task(name="src.tasks.discovery.cleanup_old_task_runs")
 def cleanup_old_task_runs() -> dict:
     """
-    Delete old task_runs and tier_transitions records to prevent unbounded table growth.
+    Delete old task_runs, tier_transitions, and csgo_price_ticks records.
 
     This is operational/diagnostic data, NOT market data.
-    Keeps last 7 days of records for debugging purposes.
+    Keeps last 7 days of records for debugging and chart display.
 
     Returns:
         Dictionary with deleted counts
     """
     from datetime import timedelta
+    from src.db.models import CSGOPriceTick
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
@@ -1012,6 +1013,10 @@ def cleanup_old_task_runs() -> dict:
 
         old_transitions = session.execute(
             select(func.count(TierTransition.id)).where(TierTransition.transitioned_at < cutoff)
+        ).scalar() or 0
+
+        old_price_ticks = session.execute(
+            select(func.count(CSGOPriceTick.id)).where(CSGOPriceTick.timestamp < cutoff)
         ).scalar() or 0
 
         if old_task_runs > 0:
@@ -1026,18 +1031,26 @@ def cleanup_old_task_runs() -> dict:
                 TierTransition.__table__.delete().where(TierTransition.transitioned_at < cutoff)
             )
 
-        if old_task_runs > 0 or old_transitions > 0:
+        if old_price_ticks > 0:
+            # Delete old csgo_price_ticks records
+            session.execute(
+                CSGOPriceTick.__table__.delete().where(CSGOPriceTick.timestamp < cutoff)
+            )
+
+        if old_task_runs > 0 or old_transitions > 0 or old_price_ticks > 0:
             session.commit()
             logger.info(
                 "Cleaned up old records",
                 task_runs_deleted=old_task_runs,
                 tier_transitions_deleted=old_transitions,
+                price_ticks_deleted=old_price_ticks,
                 cutoff=cutoff.isoformat(),
             )
 
     return {
         "task_runs_deleted": old_task_runs,
         "tier_transitions_deleted": old_transitions,
+        "price_ticks_deleted": old_price_ticks,
         "cutoff": cutoff.isoformat(),
     }
 

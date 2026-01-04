@@ -76,6 +76,7 @@ async def list_positions(
     status: Optional[str] = Query(None, description="Filter by status (open/closed)"),
     strategy: Optional[str] = Query(None, description="Filter by strategy name"),
     is_paper: Optional[bool] = Query(None, description="Filter by paper/live"),
+    exclude_csgo: bool = Query(False, description="Exclude CSGO strategies"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -94,6 +95,8 @@ async def list_positions(
         query = query.where(Position.strategy_name == strategy)
     if is_paper is not None:
         query = query.where(Position.is_paper == is_paper)
+    if exclude_csgo:
+        query = query.where(~Position.strategy_name.like("csgo_%"))
 
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
@@ -457,6 +460,7 @@ async def get_portfolio_summary(db: Session = Depends(get_db)):
 async def export_positions(
     status: Optional[str] = Query(None, description="Filter by status (open/closed)"),
     strategy: Optional[str] = Query(None, description="Filter by strategy name"),
+    exclude_csgo: bool = Query(False, description="Exclude CSGO strategies"),
     format: str = Query("csv", description="Export format (csv)"),
     db: Session = Depends(get_db),
 ):
@@ -470,6 +474,8 @@ async def export_positions(
         query = query.where(Position.status == status_value)
     if strategy:
         query = query.where(Position.strategy_name == strategy)
+    if exclude_csgo:
+        query = query.where(~Position.strategy_name.like("csgo_%"))
 
     query = query.order_by(desc(Position.entry_time))
     positions = db.execute(query).scalars().all()
@@ -860,7 +866,8 @@ def _format_decision(d: TradeDecision) -> dict:
 @router.get("/strategies/leaderboard")
 async def get_strategy_leaderboard(
     sort_by: str = Query("total_pnl", description="Sort metric"),
-    limit: int = Query(25, ge=1, le=50),
+    limit: int = Query(50, ge=1, le=100),
+    exclude_csgo: bool = Query(False, description="Exclude CSGO strategies"),
     db: Session = Depends(get_db),
 ):
     """
@@ -872,6 +879,10 @@ async def get_strategy_leaderboard(
 
     tracker = PerformanceTracker(db)
     metrics_list = tracker.get_leaderboard(sort_by=sort_by, limit=limit)
+
+    # Filter out CSGO strategies if requested
+    if exclude_csgo:
+        metrics_list = [m for m in metrics_list if not m.strategy_name.startswith("csgo_")]
 
     return {
         "sort_by": sort_by,
@@ -922,6 +933,7 @@ async def get_strategy_debug(
 
 @router.get("/strategies/balances")
 async def get_strategy_balances(
+    exclude_csgo: bool = Query(False, description="Exclude CSGO strategies"),
     db: Session = Depends(get_db),
 ):
     """
@@ -935,9 +947,12 @@ async def get_strategy_balances(
 
     PerformanceTracker(db).ensure_strategy_balances()
 
-    balances = db.query(StrategyBalance).order_by(
+    balances_query = db.query(StrategyBalance).order_by(
         desc(StrategyBalance.total_pnl)
-    ).all()
+    )
+    if exclude_csgo:
+        balances_query = balances_query.filter(~StrategyBalance.strategy_name.like("csgo_%"))
+    balances = balances_query.all()
 
     # Get position values and unrealized P&L per strategy from actual positions
     position_values = {}
@@ -945,10 +960,13 @@ async def get_strategy_balances(
     cost_basis_by_strategy = {}
     open_count_by_strategy = {}
 
-    positions = db.query(Position).filter(
+    positions_query = db.query(Position).filter(
         Position.is_paper == True,
         Position.status == PositionStatus.OPEN.value,
-    ).all()
+    )
+    if exclude_csgo:
+        positions_query = positions_query.filter(~Position.strategy_name.like("csgo_%"))
+    positions = positions_query.all()
 
     for p in positions:
         strat = p.strategy_name
@@ -1040,6 +1058,7 @@ async def list_strategies(db: Session = Depends(get_db)):
 async def get_equity_curve(
     days: int = Query(30, ge=1, le=365, description="Number of days of history"),
     strategy: Optional[str] = Query(None, description="Filter by strategy name"),
+    exclude_csgo: bool = Query(False, description="Exclude CSGO strategies"),
     db: Session = Depends(get_db),
 ):
     """
@@ -1056,9 +1075,18 @@ async def get_equity_curve(
     start_date = end_date - timedelta(days=days)
 
     # Get strategy allocations for starting values
-    strategy_balances = db.query(StrategyBalance).all()
+    strategy_balances_query = db.query(StrategyBalance)
+    if exclude_csgo:
+        strategy_balances_query = strategy_balances_query.filter(
+            ~StrategyBalance.strategy_name.like("csgo_%")
+        )
+    if strategy:
+        strategy_balances_query = strategy_balances_query.filter(
+            StrategyBalance.strategy_name == strategy
+        )
+    strategy_balances = strategy_balances_query.all()
     balances = {b.strategy_name: float(b.allocated_usd) for b in strategy_balances}
-    total_allocated = sum(balances.values()) if balances else 1200
+    total_allocated = sum(balances.values()) if balances else 400
 
     # Query closed positions grouped by exit date and strategy
     query = select(
@@ -1072,6 +1100,9 @@ async def get_equity_curve(
         Position.realized_pnl.isnot(None),
     )
 
+    if exclude_csgo:
+        query = query.where(~Position.strategy_name.like("csgo_%"))
+
     if strategy:
         query = query.where(Position.strategy_name == strategy)
 
@@ -1083,10 +1114,19 @@ async def get_equity_curve(
     results = db.execute(query).all()
 
     # Get current unrealized P&L per strategy for today's value
-    open_positions = db.query(Position).filter(
+    open_positions_query = db.query(Position).filter(
         Position.status == PositionStatus.OPEN.value,
         Position.is_paper == True,
-    ).all()
+    )
+    if exclude_csgo:
+        open_positions_query = open_positions_query.filter(
+            ~Position.strategy_name.like("csgo_%")
+        )
+    if strategy:
+        open_positions_query = open_positions_query.filter(
+            Position.strategy_name == strategy
+        )
+    open_positions = open_positions_query.all()
 
     unrealized_by_strategy = {}
     for p in open_positions:
@@ -1165,27 +1205,45 @@ async def get_equity_curve(
         day["value"] = round(day["value"], 2)
         day["cumulative_pnl"] = round(day["value"] - total_allocated, 2)
 
-    # Calculate realized and unrealized lines for the chart
+    # Calculate realized and unrealized totals for summary
     total_realized = sum(float(b.realized_pnl) for b in strategy_balances)
     total_unrealized = sum(unrealized_by_strategy.values())
 
-    # Build a simple 2-point line: start (allocation) to current (with P&L)
-    chart_data = [
-        {
-            "date": start_date.isoformat(),
-            "realized": round(total_allocated, 2),
-            "unrealized": round(total_allocated, 2),
-            "total": round(total_allocated, 2),
+    # Build daily chart data with all dates in range
+    # First, aggregate daily realized P&L by exit date
+    daily_realized_pnl = {}
+    for row in results:
+        date_str = row.date.isoformat()
+        if date_str not in daily_realized_pnl:
+            daily_realized_pnl[date_str] = 0
+        daily_realized_pnl[date_str] += float(row.daily_pnl) if row.daily_pnl else 0
+
+    # Generate all dates in the range
+    chart_data = []
+    current_date = start_date
+    cumulative_realized = 0
+
+    while current_date <= end_date:
+        date_str = current_date.isoformat()
+
+        # Add any realized P&L for this date
+        cumulative_realized += daily_realized_pnl.get(date_str, 0)
+
+        # For today, include unrealized P&L in the total line
+        if current_date == end_date:
+            unrealized_for_day = total_unrealized
+        else:
+            unrealized_for_day = 0
+
+        chart_data.append({
+            "date": date_str,
+            "realized": round(total_allocated + cumulative_realized, 2),
+            "unrealized": round(total_allocated + cumulative_realized + unrealized_for_day, 2),
+            "total": round(total_allocated + cumulative_realized + unrealized_for_day, 2),
             "baseline": round(total_allocated, 2),
-        },
-        {
-            "date": end_date.isoformat(),
-            "realized": round(total_allocated + total_realized, 2),
-            "unrealized": round(total_allocated + total_realized + total_unrealized, 2),
-            "total": round(total_allocated + total_realized + total_unrealized, 2),
-            "baseline": round(total_allocated, 2),
-        },
-    ]
+        })
+
+        current_date += timedelta(days=1)
 
     return {
         "start_date": start_date.isoformat(),
@@ -1193,7 +1251,7 @@ async def get_equity_curve(
         "days": days,
         "strategies": strategies_data,
         "total": total_list,
-        "chart_data": chart_data,  # Simple 2-line chart data
+        "chart_data": chart_data,  # Daily equity curve data
         "summary": {
             "total_allocated": round(total_allocated, 2),
             "total_realized": round(total_realized, 2),
@@ -1232,13 +1290,18 @@ async def get_funnel_stats(
     executed = [d for d in decisions if d.executed]
     rejected = [d for d in decisions if not d.executed]
 
-    # Count profitable (need to join with positions)
+    # Count profitable - batch load positions to avoid N+1 query
     profitable_count = 0
-    for d in executed:
-        if d.position_id:
-            pos = db.get(Position, d.position_id)
-            if pos and pos.realized_pnl and float(pos.realized_pnl) > 0:
-                profitable_count += 1
+    position_ids = [d.position_id for d in executed if d.position_id]
+    if position_ids:
+        positions_map = {
+            p.id: p for p in db.query(Position).filter(Position.id.in_(position_ids)).all()
+        }
+        for d in executed:
+            if d.position_id and d.position_id in positions_map:
+                pos = positions_map[d.position_id]
+                if pos.realized_pnl and float(pos.realized_pnl) > 0:
+                    profitable_count += 1
 
     # Group rejections by reason
     rejection_reasons = {}

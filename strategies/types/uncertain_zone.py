@@ -26,12 +26,16 @@ class UncertainZoneStrategy(Strategy):
         max_spread: float = None,  # Optional: maximum spread to trade (e.g., 0.04 = 4%)
         categories: list = None,  # Optional: only trade these L1 categories
         excluded_categories: list = None,  # Optional: exclude these L1 categories
+        l2_categories: list = None,  # Optional: only trade these L2 categories
+        excluded_l2_categories: list = None,  # Optional: exclude these L2 categories
+        l3_categories: list = None,  # Optional: only trade these L3 categories
+        excluded_l3_categories: list = None,  # Optional: exclude these L3 categories
         size_pct: float = 0.01,
         order_type: str = "market",
         **kwargs,
     ):
         self.name = name
-        self.version = "2.2.0"  # Fixed NO token pricing (was using YES orderbook)
+        self.version = "2.4.0"  # Added L2/L3 category filtering
         self.yes_price_min = yes_price_min
         self.yes_price_max = yes_price_max
         self.min_hours = min_hours
@@ -42,6 +46,10 @@ class UncertainZoneStrategy(Strategy):
         self.max_spread = max_spread
         self.categories = categories or []  # Empty = all categories
         self.excluded_categories = excluded_categories or []
+        self.l2_categories = l2_categories or []
+        self.excluded_l2_categories = excluded_l2_categories or []
+        self.l3_categories = l3_categories or []
+        self.excluded_l3_categories = excluded_l3_categories or []
         self.size_pct = size_pct
         self.order_type = order_type
         super().__init__()
@@ -52,10 +60,22 @@ class UncertainZoneStrategy(Strategy):
             if not m.no_token_id:
                 continue
 
-            # Category filter (if specified)
+            # L1 Category filter
             if self.categories and m.category_l1 not in self.categories:
                 continue
             if self.excluded_categories and m.category_l1 in self.excluded_categories:
+                continue
+
+            # L2 Category filter
+            if self.l2_categories and m.category_l2 not in self.l2_categories:
+                continue
+            if self.excluded_l2_categories and m.category_l2 in self.excluded_l2_categories:
+                continue
+
+            # L3 Category filter
+            if self.l3_categories and m.category_l3 not in self.l3_categories:
+                continue
+            if self.excluded_l3_categories and m.category_l3 in self.excluded_l3_categories:
                 continue
 
             # Time window - must be positive and within range
@@ -115,8 +135,9 @@ class UncertainZoneStrategy(Strategy):
             # Convert YES orderbook to NO orderbook for correct execution pricing
             # NO bid = 1 - YES ask (someone buying NO = someone selling YES)
             # NO ask = 1 - YES bid (someone selling NO = someone buying YES)
+            # Use no_ask (already calculated correctly) as fallback for NO ask
             no_best_bid = 1 - m.best_ask if m.best_ask is not None else None
-            no_best_ask = 1 - m.best_bid if m.best_bid is not None else None
+            no_best_ask = 1 - m.best_bid if m.best_bid is not None else no_ask
 
             yield Signal(
                 token_id=m.no_token_id,
@@ -143,40 +164,50 @@ class UncertainZoneStrategy(Strategy):
                 },
             )
 
+    def _passes_category_filters(self, m: MarketData) -> bool:
+        """Check if market passes all category filters (L1, L2, L3)."""
+        # L1 filter
+        if self.categories and m.category_l1 not in self.categories:
+            return False
+        if self.excluded_categories and m.category_l1 in self.excluded_categories:
+            return False
+        # L2 filter
+        if self.l2_categories and m.category_l2 not in self.l2_categories:
+            return False
+        if self.excluded_l2_categories and m.category_l2 in self.excluded_l2_categories:
+            return False
+        # L3 filter
+        if self.l3_categories and m.category_l3 not in self.l3_categories:
+            return False
+        if self.excluded_l3_categories and m.category_l3 in self.excluded_l3_categories:
+            return False
+        return True
+
     def get_debug_stats(self, markets: list[MarketData]) -> dict:
         """Return debug info about why strategy isn't trading."""
         total = len(markets)
 
-        # Category filter
-        if self.categories:
-            in_category = sum(1 for m in markets if m.category_l1 in self.categories)
-        elif self.excluded_categories:
-            in_category = sum(1 for m in markets if m.category_l1 not in self.excluded_categories)
-        else:
-            in_category = total
+        # Category filter (all levels)
+        in_category = sum(1 for m in markets if self._passes_category_filters(m))
 
         in_time = sum(
             1 for m in markets
             if m.hours_to_close and self.min_hours <= m.hours_to_close <= self.max_hours
-            and (not self.categories or m.category_l1 in self.categories)
-            and (not self.excluded_categories or m.category_l1 not in self.excluded_categories)
+            and self._passes_category_filters(m)
         )
 
         in_zone = sum(
             1 for m in markets
             if m.hours_to_close and self.min_hours <= m.hours_to_close <= self.max_hours
             and m.price and self.yes_price_min <= m.price <= self.yes_price_max
-            and (not self.categories or m.category_l1 in self.categories)
-            and (not self.excluded_categories or m.category_l1 not in self.excluded_categories)
+            and self._passes_category_filters(m)
         )
 
         with_spread = 0
         with_edge = 0
         for m in markets:
-            # Category filter
-            if self.categories and m.category_l1 not in self.categories:
-                continue
-            if self.excluded_categories and m.category_l1 in self.excluded_categories:
+            # Category filter (all levels)
+            if not self._passes_category_filters(m):
                 continue
 
             if not m.hours_to_close:
@@ -202,7 +233,10 @@ class UncertainZoneStrategy(Strategy):
                     with_edge += 1
 
         # Build funnel string
-        cat_filter = f" → {in_category} (cats)" if (self.categories or self.excluded_categories) else ""
+        has_cat_filter = (self.categories or self.excluded_categories or
+                         self.l2_categories or self.excluded_l2_categories or
+                         self.l3_categories or self.excluded_l3_categories)
+        cat_filter = f" → {in_category} (cats)" if has_cat_filter else ""
         spread_filter = f" → {with_spread} (spread)" if self.max_spread else ""
 
         return {
@@ -220,6 +254,10 @@ class UncertainZoneStrategy(Strategy):
                 "max_spread": f"{self.max_spread:.0%}" if self.max_spread else "none",
                 "categories": self.categories if self.categories else "all",
                 "excluded_categories": self.excluded_categories if self.excluded_categories else "none",
+                "l2_categories": self.l2_categories if self.l2_categories else "all",
+                "excluded_l2_categories": self.excluded_l2_categories if self.excluded_l2_categories else "none",
+                "l3_categories": self.l3_categories if self.l3_categories else "all",
+                "excluded_l3_categories": self.excluded_l3_categories if self.excluded_l3_categories else "none",
             },
             "funnel": f"{total}{cat_filter} → {in_time} (time) → {in_zone} (zone){spread_filter} → {with_edge} (edge≥{self.min_edge_after_spread:.0%})",
         }

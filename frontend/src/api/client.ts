@@ -702,6 +702,343 @@ export interface RuleStat {
   enabled: boolean
 }
 
+// CS:GO Strategy types
+export interface CSGOTeam {
+  team_name: string
+  wins: number
+  losses: number
+  total_matches: number
+  win_rate_pct: number
+  updated_at: string | null
+}
+
+export interface CSGOTeamsResponse {
+  total: number
+  offset: number
+  limit: number
+  teams: CSGOTeam[]
+}
+
+export interface CSGOH2HRecord {
+  opponent: string
+  wins: number
+  losses: number
+  total: number
+}
+
+export interface CSGOTeamDetails {
+  team_name: string
+  wins: number
+  losses: number
+  total_matches: number
+  win_rate_pct: number
+  updated_at: string | null
+  h2h_records: CSGOH2HRecord[]
+}
+
+export interface CSGOH2H {
+  team1: string
+  team2: string
+  team1_wins: number
+  team2_wins: number
+  total_matches: number
+  found: boolean
+}
+
+export interface CSGOPosition {
+  id: number
+  strategy_name: string
+  market_id: number | null
+  market_question: string | null
+  // Team info from csgo_matches
+  team_yes: string | null
+  team_no: string | null
+  bet_on_team: string | null
+  bet_on_side: string | null  // YES or NO
+  // Match detail from csgo_matches
+  market_type: string | null  // moneyline, child_moneyline
+  format: string | null  // BO1, BO3
+  group_item_title: string | null  // Match Winner, Map 1 Winner, etc.
+  tournament: string | null
+  game_start_time: string | null
+  // Prices
+  entry_price: number
+  current_token_price: number | null
+  yes_price: number | null
+  no_price: number | null
+  // Position details
+  token_id: string | null
+  side: string
+  entry_time: string | null
+  size_shares: number
+  cost_basis: number
+  current_value: number | null
+  unrealized_pnl: number
+  realized_pnl: number
+  status: string
+  close_reason: string | null
+  is_hedge: boolean
+  hedge_position_id: number | null
+  exit_price: number | null
+  exit_time: string | null
+}
+
+export interface CSGOPositionsResponse {
+  total: number
+  offset: number
+  limit: number
+  positions: CSGOPosition[]
+}
+
+export interface CSGOActiveMarket {
+  market_id: number
+  question: string
+  team_a: string | null
+  team_b: string | null
+  team_a_winrate: number | null
+  team_b_winrate: number | null
+  favorite_side: string
+  favorite_price: number
+  winrate_diff: number
+  signal_strength: 'none' | 'base' | 'strong' | 'very_strong'
+  hours_to_close: number | null
+  best_bid: number | null
+  best_ask: number | null
+}
+
+export interface CSGOActiveMarketsResponse {
+  total: number
+  hours_ahead: number
+  opportunities: CSGOActiveMarket[]
+}
+
+export interface CSGOMatch {
+  market_id: number
+  question: string
+  team_a: string | null
+  team_b: string | null
+  team_a_winrate: number | null
+  team_b_winrate: number | null
+  favorite_side: string | null
+  favorite_price: number | null
+  current_price: number | null
+  best_bid: number | null
+  best_ask: number | null
+  winrate_diff: number | null
+  signal_strength: 'none' | 'base' | 'strong' | 'very_strong'
+  size_usd: number | null
+  hours_to_close: number | null
+  end_date: string | null
+  meets_criteria: boolean
+  criteria: {
+    has_teams: boolean
+    has_winrates: boolean
+    price_in_range: boolean
+    time_in_range: boolean
+    has_edge: boolean
+  }
+}
+
+export interface CSGOMatchesResponse {
+  total: number
+  meeting_criteria: number
+  matches: CSGOMatch[]
+}
+
+export interface CSGOPerformanceSummary {
+  total: number
+  open: number
+  hedged: number
+  stopped: number
+  resolved: number
+  total_pnl: number
+  unrealized_pnl: number
+  realized_pnl: number
+}
+
+export interface CSGOPeriodStats {
+  total_positions: number
+  closed_positions: number
+  wins: number
+  losses: number
+  win_rate: number
+  total_realized_pnl: number
+}
+
+export interface CSGOPerformanceResponse {
+  days: number
+  summary: CSGOPerformanceSummary
+  period_stats: CSGOPeriodStats
+}
+
+// CS:GO Pipeline types
+export interface CSGOPipelineMatch {
+  id: number
+  market_id: number
+  gamma_id: number | null
+  condition_id: string
+  team_yes: string | null
+  team_no: string | null
+  game_start_time: string | null
+  game_start_override: boolean
+  end_date: string | null
+  tournament: string | null
+  format: string | null
+  market_type: string | null
+  group_item_title: string | null
+  subscribed: boolean
+  // Lifecycle fields
+  closed: boolean
+  resolved: boolean
+  outcome: string | null
+  accepting_orders: boolean
+  last_status_check: string | null
+  // Market data
+  tier: number | null
+  current_price: number | null
+  best_bid: number | null
+  best_ask: number | null
+  spread: number | null
+  volume_24h: number | null
+  liquidity: number | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface CSGOPipelineMatchesResponse {
+  total: number
+  offset: number
+  limit: number
+  matches: CSGOPipelineMatch[]
+}
+
+export interface CSGOPipelineEventMarket {
+  id: number
+  market_id: number
+  market_type: string
+  label: string
+  group_item_title: string | null
+  format: string | null
+  current_price: number | null
+  spread: number | null
+  volume: number | null
+  volume_24h: number | null
+  liquidity: number | null
+  subscribed: boolean
+  closed: boolean
+  resolved: boolean
+}
+
+export interface CSGOPipelineEvent {
+  event_key: string
+  team_yes: string
+  team_no: string
+  tournament: string | null
+  format: string | null
+  game_start_time: string | null
+  is_live: boolean
+  main_price: number | null
+  main_spread: number | null
+  market_count: number
+  markets: CSGOPipelineEventMarket[]
+}
+
+export interface CSGOPipelineEventsResponse {
+  total: number
+  events: CSGOPipelineEvent[]
+}
+
+export interface CSGOPipelineSignal {
+  market_id: number
+  match_id: number
+  condition_id: string
+  token_type: string
+  event_type: string
+  timestamp: string
+  price?: number
+  size?: number
+  side?: string
+  best_bid?: number
+  best_ask?: number
+  spread?: number
+  mid_price?: number
+  price_velocity_1m?: number
+  _message_id?: string
+}
+
+export interface CSGOPipelineSignalsResponse {
+  stream_stats: {
+    length: number
+    first_entry?: string
+    last_entry?: string
+    error?: string
+  }
+  count: number
+  signals: CSGOPipelineSignal[]
+}
+
+export interface CSGOPipelineSyncResponse {
+  sync: {
+    new: number
+    existing: number
+    total: number
+  }
+  enrichment: {
+    enriched: number
+    failed: number
+    skipped: number
+  }
+}
+
+export interface CSGOPositionListItem {
+  id: number
+  market_id: number
+  label: string
+  status: string
+}
+
+export interface CSGOPositionListResponse {
+  positions: CSGOPositionListItem[]
+}
+
+export interface CSGOPriceDataPoint {
+  timestamp: string
+  yes_price: number | null
+  no_price: number | null
+  best_bid: number | null
+  best_ask: number | null
+  volume_24h: number | null
+}
+
+export interface CSGOTradeMarker {
+  timestamp: string
+  side: string
+  price: number | null
+  size_usd: number | null
+  position_id: number
+  bet_on_team: string | null
+  bet_on_side: string | null
+  strategy_name: string | null
+  spread: number | null
+  slippage: number | null
+}
+
+export interface CSGOPriceHistoryResponse {
+  market_id: number
+  match_info: {
+    team_yes: string | null
+    team_no: string | null
+    format: string | null
+    group_item_title: string | null
+    tournament: string | null
+    game_start_time: string | null
+  } | null
+  price_data: CSGOPriceDataPoint[]
+  trades: CSGOTradeMarker[]
+  data_points: number
+  data_source: string
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`)
   if (!response.ok) {
@@ -793,14 +1130,13 @@ export const api = {
     limit?: number
     offset?: number
   }) => {
-    const searchParams = new URLSearchParams()
+    const searchParams = new URLSearchParams({ exclude_csgo: 'true' })
     if (params?.status) searchParams.set('status', params.status)
     if (params?.strategy) searchParams.set('strategy', params.strategy)
     if (params?.is_paper !== undefined) searchParams.set('is_paper', String(params.is_paper))
     if (params?.limit) searchParams.set('limit', String(params.limit))
     if (params?.offset) searchParams.set('offset', String(params.offset))
-    const qs = searchParams.toString()
-    return fetchJson<{ total: number; items: ExecutorPosition[] }>(`/api/executor/positions${qs ? `?${qs}` : ''}`)
+    return fetchJson<{ total: number; items: ExecutorPosition[] }>(`/api/executor/positions?${searchParams}`)
   },
 
   closePosition: async (positionId: number, exitPrice?: number, reason?: string) => {
@@ -955,14 +1291,14 @@ export const api = {
     return response.json() as Promise<WalletSyncResult>
   },
 
-  // Analyst dashboard endpoints
-  getStrategyBalances: () => fetchJson<StrategyBalancesResponse>('/api/executor/strategies/balances'),
+  // Analyst dashboard endpoints (exclude_csgo=true filters out CSGO strategies)
+  getStrategyBalances: () => fetchJson<StrategyBalancesResponse>('/api/executor/strategies/balances?exclude_csgo=true'),
 
   getLeaderboard: (sortBy = 'total_pnl') =>
-    fetchJson<LeaderboardResponse>(`/api/executor/strategies/leaderboard?sort_by=${sortBy}`),
+    fetchJson<LeaderboardResponse>(`/api/executor/strategies/leaderboard?sort_by=${sortBy}&exclude_csgo=true`),
 
   getEquityCurve: (days = 30, strategy?: string) => {
-    const params = new URLSearchParams({ days: String(days) })
+    const params = new URLSearchParams({ days: String(days), exclude_csgo: 'true' })
     if (strategy) params.set('strategy', strategy)
     return fetchJson<EquityCurveResponse>(`/api/executor/strategies/equity-curve?${params}`)
   },
@@ -1011,11 +1347,10 @@ export const api = {
 
   // CSV export URL builder
   getPositionsExportUrl: (params?: { status?: string; strategy?: string }) => {
-    const searchParams = new URLSearchParams()
+    const searchParams = new URLSearchParams({ exclude_csgo: 'true' })
     if (params?.status) searchParams.set('status', params.status)
     if (params?.strategy) searchParams.set('strategy', params.strategy)
-    const qs = searchParams.toString()
-    return `/api/executor/positions/export${qs ? `?${qs}` : ''}`
+    return `/api/executor/positions/export?${searchParams}`
   },
 
   // Categorization monitoring
@@ -1028,6 +1363,131 @@ export const api = {
     fetchJson<{ items: RuleStat[]; limit: number; offset: number }>(
       `/api/categorization/rules?limit=${limit}&offset=${offset}`
     ),
+
+  // CS:GO Strategy
+  getCSGOTeams: (limit = 50, offset = 0, sortBy = 'win_rate_pct', minMatches = 0) =>
+    fetchJson<CSGOTeamsResponse>(`/api/csgo/teams?limit=${limit}&offset=${offset}&sort_by=${sortBy}&min_matches=${minMatches}`),
+
+  getCSGOTeamDetails: (teamName: string) =>
+    fetchJson<CSGOTeamDetails>(`/api/csgo/teams/${encodeURIComponent(teamName)}`),
+
+  getCSGOH2H: (team1: string, team2: string) =>
+    fetchJson<CSGOH2H>(`/api/csgo/h2h?team1=${encodeURIComponent(team1)}&team2=${encodeURIComponent(team2)}`),
+
+  getCSGOPositions: (status?: string, limit = 50, offset = 0) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    if (status) params.set('status', status)
+    return fetchJson<CSGOPositionsResponse>(`/api/csgo/positions?${params}`)
+  },
+
+  getCSGOActiveMarkets: (hoursAhead = 2.0, minPrice = 0.65, maxPrice = 0.80) =>
+    fetchJson<CSGOActiveMarketsResponse>(`/api/csgo/markets/active?hours_ahead=${hoursAhead}&min_favorite_price=${minPrice}&max_favorite_price=${maxPrice}`),
+
+  getCSGOMatches: () =>
+    fetchJson<CSGOMatchesResponse>('/api/csgo/matches'),
+
+  getCSGOPerformance: (days = 30) =>
+    fetchJson<CSGOPerformanceResponse>(`/api/csgo/performance?days=${days}`),
+
+  refreshCSGOData: () =>
+    fetchJson<{ success: boolean; output?: string; error?: string }>('/api/csgo/refresh-data'),
+
+  // CS:GO Pipeline endpoints
+  getCSGOPipelineMatches: (params?: {
+    upcoming_only?: boolean
+    hours_ahead?: number
+    enriched_only?: boolean
+    limit?: number
+    offset?: number
+  }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.upcoming_only !== undefined) searchParams.set('upcoming_only', String(params.upcoming_only))
+    if (params?.hours_ahead !== undefined) searchParams.set('hours_ahead', String(params.hours_ahead))
+    if (params?.enriched_only !== undefined) searchParams.set('enriched_only', String(params.enriched_only))
+    if (params?.limit) searchParams.set('limit', String(params.limit))
+    if (params?.offset) searchParams.set('offset', String(params.offset))
+    const qs = searchParams.toString()
+    return fetchJson<CSGOPipelineMatchesResponse>(`/api/csgo/pipeline/matches${qs ? `?${qs}` : ''}`)
+  },
+
+  getCSGOPipelineEvents: (params?: {
+    upcoming_only?: boolean
+    hours_ahead?: number
+    limit?: number
+  }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.upcoming_only !== undefined) searchParams.set('upcoming_only', String(params.upcoming_only))
+    if (params?.hours_ahead !== undefined) searchParams.set('hours_ahead', String(params.hours_ahead))
+    if (params?.limit) searchParams.set('limit', String(params.limit))
+    const qs = searchParams.toString()
+    return fetchJson<CSGOPipelineEventsResponse>(`/api/csgo/pipeline/events${qs ? `?${qs}` : ''}`)
+  },
+
+  getCSGOPipelineMatch: (matchId: number) =>
+    fetchJson<CSGOPipelineMatch & { market_question: string | null; gamma_data: Record<string, unknown> | null }>(
+      `/api/csgo/pipeline/matches/${matchId}`
+    ),
+
+  updateCSGOPipelineMatch: async (matchId: number, gameStartTime: string) => {
+    const response = await fetch(
+      `${API_BASE}/api/csgo/pipeline/matches/${matchId}?game_start_time=${encodeURIComponent(gameStartTime)}`,
+      { method: 'PATCH' }
+    )
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json()
+  },
+
+  getCSGOPipelineSignals: (count = 50, conditionId?: string) => {
+    const params = new URLSearchParams({ count: String(count) })
+    if (conditionId) params.set('condition_id', conditionId)
+    return fetchJson<CSGOPipelineSignalsResponse>(`/api/csgo/pipeline/signals?${params}`)
+  },
+
+  syncCSGOPipeline: async () => {
+    const response = await fetch(`${API_BASE}/api/csgo/pipeline/sync`, { method: 'POST' })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    return response.json() as Promise<CSGOPipelineSyncResponse>
+  },
+
+  // CS:GO Price Chart endpoints
+  getCSGOPositionList: () =>
+    fetchJson<CSGOPositionListResponse>('/api/csgo/positions/list'),
+
+  getCSGOPriceHistory: (marketId: number) =>
+    fetchJson<CSGOPriceHistoryResponse>(`/api/csgo/price-history/${marketId}`),
+
+  // CSGO Engine (new real-time trading system) endpoints
+  getCSGOEngineHealth: () =>
+    fetchJson<CSGOEngineHealth>('/api/csgo-engine/health'),
+
+  getCSGOEngineStats: () =>
+    fetchJson<CSGOEngineStats>('/api/csgo-engine/stats'),
+
+  getCSGOEngineStrategies: () =>
+    fetchJson<CSGOEngineStrategyState[]>('/api/csgo-engine/strategies'),
+
+  getCSGOEnginePositions: (status?: string, strategy?: string, limit = 100) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (status) params.set('status', status)
+    if (strategy) params.set('strategy', strategy)
+    return fetchJson<CSGOEnginePosition[]>(`/api/csgo-engine/positions?${params}`)
+  },
+
+  getCSGOEngineSpreads: (status?: string, strategy?: string, limit = 100) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (status) params.set('status', status)
+    if (strategy) params.set('strategy', strategy)
+    return fetchJson<CSGOEngineSpread[]>(`/api/csgo-engine/spreads?${params}`)
+  },
+
+  getCSGOEngineTrades: (positionId?: number, limit = 100) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (positionId) params.set('position_id', String(positionId))
+    return fetchJson<CSGOEngineTrade[]>(`/api/csgo-engine/trades?${params}`)
+  },
+
+  getCSGOEngineStream: () =>
+    fetchJson<{ length: number; first_entry?: string; last_entry?: string; error?: string }>('/api/csgo-engine/stream'),
 }
 
 // Analytics types
@@ -1153,4 +1613,88 @@ export interface PortfolioSummary {
   total_allocated: number
   high_water_mark: number
   current_drawdown_pct: number
+}
+
+// CSGO Engine types (new real-time trading system)
+export interface CSGOEngineHealth {
+  status: 'healthy' | 'degraded' | 'unhealthy'
+  message: string
+}
+
+export interface CSGOEngineStats {
+  positions_open: number
+  positions_closed: number
+  spreads_open: number
+  spreads_closed: number
+  total_trades: number
+  strategies_active: number
+  total_realized_pnl: number
+  total_unrealized_pnl: number
+  stream_length: number
+}
+
+export interface CSGOEngineStrategyState {
+  strategy_name: string
+  allocated_usd: number
+  available_usd: number
+  total_realized_pnl: number
+  total_unrealized_pnl: number
+  trade_count: number
+  win_count: number
+  loss_count: number
+  win_rate: number | null
+  is_active: boolean
+}
+
+export interface CSGOEnginePosition {
+  id: number
+  strategy_name: string
+  market_id: number
+  token_type: string
+  remaining_shares: number
+  avg_entry_price: number
+  current_price: number | null
+  unrealized_pnl: number | null
+  realized_pnl: number
+  team_yes: string | null
+  team_no: string | null
+  format: string | null
+  cost_basis: number
+  entry_spread: number | null
+  opened_at: string | null
+  status: string
+}
+
+export interface CSGOEngineSpread {
+  id: number
+  strategy_name: string
+  market_id: number
+  spread_type: string
+  total_cost_basis: number
+  total_realized_pnl: number
+  total_unrealized_pnl: number
+  team_yes: string | null
+  team_no: string | null
+  status: string
+}
+
+export interface CSGOEngineTrade {
+  id: number
+  position_id: number
+  side: string
+  shares: number
+  price: number
+  cost_usd: number
+  slippage: number | null
+  // Orderbook state
+  best_bid: number | null
+  best_ask: number | null
+  spread: number | null
+  // Match context
+  team_yes: string | null
+  team_no: string | null
+  format: string | null
+  map_number: number | null
+  game_start_time: string | null
+  created_at: string
 }

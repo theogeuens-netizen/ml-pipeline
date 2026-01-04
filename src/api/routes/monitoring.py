@@ -11,18 +11,53 @@ Existing pages already cover:
 - Data Quality: Per-tier coverage %, data gaps
 - Tasks: Task runs history, success rates
 """
+import json
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Callable, Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session
+import redis as redis_sync
 
 from src.db.database import get_db
 from src.db.models import Snapshot, Trade, TaskRun
 from src.db.redis import RedisClient
+from src.config.settings import settings
 
 router = APIRouter()
+
+
+# Redis caching helper
+def get_cached_or_compute(cache_key: str, ttl_seconds: int, compute_fn: Callable[[], Any]) -> Any:
+    """
+    Get value from Redis cache or compute and cache it.
+
+    Args:
+        cache_key: Redis key for caching
+        ttl_seconds: Cache TTL in seconds
+        compute_fn: Function to compute the value if not cached
+
+    Returns:
+        Cached or computed value
+    """
+    try:
+        r = redis_sync.from_url(settings.redis_url, decode_responses=True, socket_timeout=2)
+        cached = r.get(cache_key)
+        if cached:
+            r.close()
+            return json.loads(cached)
+
+        # Compute the value
+        result = compute_fn()
+
+        # Cache it
+        r.set(cache_key, json.dumps(result, default=str), ex=ttl_seconds)
+        r.close()
+        return result
+    except Exception:
+        # On any Redis error, just compute without caching
+        return compute_fn()
 
 # Define optional field categories for completeness tracking
 OPTIONAL_FIELDS = {
@@ -218,71 +253,80 @@ async def get_system_health(db: Session = Depends(get_db)):
 
     Returns:
         WebSocket status, Celery worker count, trade rate, error rate
+
+    Cached for 10 seconds to reduce database load.
     """
-    redis = RedisClient()
-    now = datetime.now(timezone.utc)
+    def compute_health():
+        redis = RedisClient()
+        now = datetime.now(timezone.utc)
 
-    try:
-        # WebSocket health
-        ws_last_activity = await redis.get_ws_last_activity()
-        ws_connected_count = await redis.get_ws_connected_count()
+        import asyncio
+        loop = asyncio.new_event_loop()
 
-        if ws_last_activity:
-            seconds_since_activity = int((now - ws_last_activity).total_seconds())
-            if seconds_since_activity < 60:
-                ws_status = "healthy"
-            elif seconds_since_activity < 120:
-                ws_status = "stale"
+        try:
+            # WebSocket health
+            ws_last_activity = loop.run_until_complete(redis.get_ws_last_activity())
+            ws_connected_count = loop.run_until_complete(redis.get_ws_connected_count())
+
+            if ws_last_activity:
+                seconds_since_activity = int((now - ws_last_activity).total_seconds())
+                if seconds_since_activity < 60:
+                    ws_status = "healthy"
+                elif seconds_since_activity < 120:
+                    ws_status = "stale"
+                else:
+                    ws_status = "disconnected"
             else:
                 ws_status = "disconnected"
-        else:
-            ws_status = "disconnected"
-            seconds_since_activity = None
+                seconds_since_activity = None
 
-        # Trades in last hour
-        one_hour_ago = now - timedelta(hours=1)
-        trades_last_hour = db.execute(
-            select(func.count(Trade.id)).where(Trade.timestamp >= one_hour_ago)
-        ).scalar() or 0
+            # Trades in last hour
+            one_hour_ago = now - timedelta(hours=1)
+            trades_last_hour = db.execute(
+                select(func.count(Trade.id)).where(Trade.timestamp >= one_hour_ago)
+            ).scalar() or 0
 
-        # Calculate trades per minute
-        ten_min_ago = now - timedelta(minutes=10)
-        trades_last_10min = db.execute(
-            select(func.count(Trade.id)).where(Trade.timestamp >= ten_min_ago)
-        ).scalar() or 0
-        trades_per_minute = round(trades_last_10min / 10, 1)
+            # Calculate trades per minute
+            ten_min_ago = now - timedelta(minutes=10)
+            trades_last_10min = db.execute(
+                select(func.count(Trade.id)).where(Trade.timestamp >= ten_min_ago)
+            ).scalar() or 0
+            trades_per_minute = round(trades_last_10min / 10, 1)
 
-        # Task errors in last 10 minutes
-        errors_last_10min = db.execute(
-            select(func.count(TaskRun.id)).where(
-                TaskRun.started_at >= ten_min_ago,
-                TaskRun.status == "failed",
-            )
-        ).scalar() or 0
+            # Task errors in last 10 minutes
+            errors_last_10min = db.execute(
+                select(func.count(TaskRun.id)).where(
+                    TaskRun.started_at >= ten_min_ago,
+                    TaskRun.status == "failed",
+                )
+            ).scalar() or 0
 
-        # Task success in last 10 minutes
-        tasks_last_10min = db.execute(
-            select(func.count(TaskRun.id)).where(TaskRun.started_at >= ten_min_ago)
-        ).scalar() or 0
+            # Task success in last 10 minutes
+            tasks_last_10min = db.execute(
+                select(func.count(TaskRun.id)).where(TaskRun.started_at >= ten_min_ago)
+            ).scalar() or 0
 
-        return {
-            "timestamp": now.isoformat(),
-            "websocket": {
-                "status": ws_status,
-                "connected_markets": ws_connected_count,
-                "last_activity": ws_last_activity.isoformat() if ws_last_activity else None,
-                "seconds_since_activity": seconds_since_activity,
-                "trades_last_hour": trades_last_hour,
-                "trades_per_minute": trades_per_minute,
-            },
-            "tasks": {
-                "tasks_last_10min": tasks_last_10min,
-                "errors_last_10min": errors_last_10min,
-                "error_rate_pct": round(errors_last_10min / tasks_last_10min * 100, 1) if tasks_last_10min > 0 else 0,
-            },
-        }
-    finally:
-        await redis.close()
+            return {
+                "timestamp": now.isoformat(),
+                "websocket": {
+                    "status": ws_status,
+                    "connected_markets": ws_connected_count,
+                    "last_activity": ws_last_activity.isoformat() if ws_last_activity else None,
+                    "seconds_since_activity": seconds_since_activity,
+                    "trades_last_hour": trades_last_hour,
+                    "trades_per_minute": trades_per_minute,
+                },
+                "tasks": {
+                    "tasks_last_10min": tasks_last_10min,
+                    "errors_last_10min": errors_last_10min,
+                    "error_rate_pct": round(errors_last_10min / tasks_last_10min * 100, 1) if tasks_last_10min > 0 else 0,
+                },
+            }
+        finally:
+            loop.run_until_complete(redis.close())
+            loop.close()
+
+    return get_cached_or_compute("monitoring:health", 10, compute_health)
 
 
 @router.get("/monitoring/connections")
@@ -597,84 +641,89 @@ async def get_field_completeness(db: Session = Depends(get_db)):
         - Overall completeness percentage
         - Completeness by category (price, orderbook, trade_flow, etc.)
         - Completeness by tier
+
+    Cached for 60 seconds - this is an expensive query scanning millions of rows.
     """
-    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    def compute_field_completeness():
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
 
-    # Build SQL for counting non-NULL fields per category
-    # This is more efficient than loading all snapshots into Python
+        # Build SQL for counting non-NULL fields per category
+        # This is more efficient than loading all snapshots into Python
 
-    # Build case expressions for each field
-    field_cases = []
-    for field in sum(OPTIONAL_FIELDS.values(), []):
-        field_cases.append(f"CASE WHEN {field} IS NOT NULL THEN 1 ELSE 0 END")
+        # Build case expressions for each field
+        field_cases = []
+        for field in sum(OPTIONAL_FIELDS.values(), []):
+            field_cases.append(f"CASE WHEN {field} IS NOT NULL THEN 1 ELSE 0 END")
 
-    all_fields_sum = " + ".join(field_cases)
+        all_fields_sum = " + ".join(field_cases)
 
-    # Overall completeness
-    overall_query = text(f"""
-        SELECT
-            COUNT(*) as total_snapshots,
-            AVG(({all_fields_sum}) / {TOTAL_OPTIONAL_FIELDS}.0 * 100) as avg_completeness
-        FROM snapshots
-        WHERE timestamp > :cutoff
-    """)
-
-    overall_result = db.execute(overall_query, {"cutoff": one_hour_ago}).fetchone()
-    total_snapshots = overall_result[0] or 0
-    avg_completeness = round(overall_result[1] or 0, 1)
-
-    # By tier
-    tier_query = text(f"""
-        SELECT
-            tier,
-            COUNT(*) as count,
-            AVG(({all_fields_sum}) / {TOTAL_OPTIONAL_FIELDS}.0 * 100) as avg_completeness
-        FROM snapshots
-        WHERE timestamp > :cutoff
-        GROUP BY tier
-        ORDER BY tier
-    """)
-
-    tier_results = db.execute(tier_query, {"cutoff": one_hour_ago}).fetchall()
-    by_tier = {
-        str(row[0]): {
-            "count": row[1],
-            "avg_completeness_pct": round(row[2] or 0, 1),
-        }
-        for row in tier_results
-    }
-
-    # By category
-    by_category = {}
-    for category, fields in OPTIONAL_FIELDS.items():
-        category_cases = [f"CASE WHEN {f} IS NOT NULL THEN 1 ELSE 0 END" for f in fields]
-        category_sum = " + ".join(category_cases)
-
-        cat_query = text(f"""
+        # Overall completeness
+        overall_query = text(f"""
             SELECT
-                AVG(({category_sum}) / {len(fields)}.0 * 100) as avg_completeness,
-                AVG({category_sum}) as avg_populated
+                COUNT(*) as total_snapshots,
+                AVG(({all_fields_sum}) / {TOTAL_OPTIONAL_FIELDS}.0 * 100) as avg_completeness
             FROM snapshots
             WHERE timestamp > :cutoff
         """)
 
-        cat_result = db.execute(cat_query, {"cutoff": one_hour_ago}).fetchone()
-        by_category[category] = {
-            "fields_total": len(fields),
-            "avg_populated": round(cat_result[1] or 0, 1),
-            "pct": round(cat_result[0] or 0, 1),
+        overall_result = db.execute(overall_query, {"cutoff": one_hour_ago}).fetchone()
+        total_snapshots = overall_result[0] or 0
+        avg_completeness = round(overall_result[1] or 0, 1)
+
+        # By tier
+        tier_query = text(f"""
+            SELECT
+                tier,
+                COUNT(*) as count,
+                AVG(({all_fields_sum}) / {TOTAL_OPTIONAL_FIELDS}.0 * 100) as avg_completeness
+            FROM snapshots
+            WHERE timestamp > :cutoff
+            GROUP BY tier
+            ORDER BY tier
+        """)
+
+        tier_results = db.execute(tier_query, {"cutoff": one_hour_ago}).fetchall()
+        by_tier = {
+            str(row[0]): {
+                "count": row[1],
+                "avg_completeness_pct": round(row[2] or 0, 1),
+            }
+            for row in tier_results
         }
 
-    return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "overall": {
-            "avg_completeness_pct": avg_completeness,
-            "total_snapshots_1h": total_snapshots,
-            "total_optional_fields": TOTAL_OPTIONAL_FIELDS,
-        },
-        "by_category": by_category,
-        "by_tier": by_tier,
-    }
+        # By category
+        by_category = {}
+        for category, fields in OPTIONAL_FIELDS.items():
+            category_cases = [f"CASE WHEN {f} IS NOT NULL THEN 1 ELSE 0 END" for f in fields]
+            category_sum = " + ".join(category_cases)
+
+            cat_query = text(f"""
+                SELECT
+                    AVG(({category_sum}) / {len(fields)}.0 * 100) as avg_completeness,
+                    AVG({category_sum}) as avg_populated
+                FROM snapshots
+                WHERE timestamp > :cutoff
+            """)
+
+            cat_result = db.execute(cat_query, {"cutoff": one_hour_ago}).fetchone()
+            by_category[category] = {
+                "fields_total": len(fields),
+                "avg_populated": round(cat_result[1] or 0, 1),
+                "pct": round(cat_result[0] or 0, 1),
+            }
+
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "overall": {
+                "avg_completeness_pct": avg_completeness,
+                "total_snapshots_1h": total_snapshots,
+                "total_optional_fields": TOTAL_OPTIONAL_FIELDS,
+            },
+            "by_category": by_category,
+            "by_tier": by_tier,
+        }
+
+    return get_cached_or_compute("monitoring:field_completeness", 60, compute_field_completeness)
 
 
 @router.get("/monitoring/tier-transitions")
@@ -687,55 +736,60 @@ async def get_tier_transitions(
 
     Shows markets moving between tiers (T0→T1, T1→T2, etc.)
     and markets being deactivated (-1 represents deactivated).
+
+    Cached for 30 seconds.
     """
-    from src.db.models import TierTransition
+    def compute_tier_transitions():
+        from src.db.models import TierTransition
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    # Summary by transition type
-    transitions = db.execute(
-        select(
-            TierTransition.from_tier,
-            TierTransition.to_tier,
-            func.count(TierTransition.id).label("count")
-        )
-        .where(TierTransition.transitioned_at >= cutoff)
-        .group_by(TierTransition.from_tier, TierTransition.to_tier)
-    ).all()
+        # Summary by transition type
+        transitions = db.execute(
+            select(
+                TierTransition.from_tier,
+                TierTransition.to_tier,
+                func.count(TierTransition.id).label("count")
+            )
+            .where(TierTransition.transitioned_at >= cutoff)
+            .group_by(TierTransition.from_tier, TierTransition.to_tier)
+        ).all()
 
-    # Format as "T0→T1": count
-    summary = {}
-    for row in transitions:
-        from_label = f"T{row[0]}" if row[0] >= 0 else "new"
-        to_label = f"T{row[1]}" if row[1] >= 0 else "deactivated"
-        key = f"{from_label}→{to_label}"
-        summary[key] = row[2]
+        # Format as "T0→T1": count
+        summary = {}
+        for row in transitions:
+            from_label = f"T{row[0]}" if row[0] >= 0 else "new"
+            to_label = f"T{row[1]}" if row[1] >= 0 else "deactivated"
+            key = f"{from_label}→{to_label}"
+            summary[key] = row[2]
 
-    # Recent transitions list
-    recent = db.execute(
-        select(TierTransition)
-        .where(TierTransition.transitioned_at >= cutoff)
-        .order_by(TierTransition.transitioned_at.desc())
-        .limit(50)
-    ).scalars().all()
+        # Recent transitions list
+        recent = db.execute(
+            select(TierTransition)
+            .where(TierTransition.transitioned_at >= cutoff)
+            .order_by(TierTransition.transitioned_at.desc())
+            .limit(50)
+        ).scalars().all()
 
-    return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "period_hours": hours,
-        "summary": summary,
-        "total_transitions": sum(summary.values()),
-        "recent": [
-            {
-                "market": t.market_slug[:40] if t.market_slug else t.condition_id[:20],
-                "from_tier": t.from_tier,
-                "to_tier": t.to_tier,
-                "at": t.transitioned_at.isoformat(),
-                "hours_to_close": float(t.hours_to_close) if t.hours_to_close else None,
-                "reason": t.reason,
-            }
-            for t in recent
-        ],
-    }
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "period_hours": hours,
+            "summary": summary,
+            "total_transitions": sum(summary.values()),
+            "recent": [
+                {
+                    "market": t.market_slug[:40] if t.market_slug else t.condition_id[:20],
+                    "from_tier": t.from_tier,
+                    "to_tier": t.to_tier,
+                    "at": t.transitioned_at.isoformat(),
+                    "hours_to_close": float(t.hours_to_close) if t.hours_to_close else None,
+                    "reason": t.reason,
+                }
+                for t in recent
+            ],
+        }
+
+    return get_cached_or_compute(f"monitoring:tier_transitions:{hours}", 30, compute_tier_transitions)
 
 
 @router.get("/monitoring/task-activity")
@@ -745,74 +799,81 @@ async def get_task_activity(
 ):
     """
     Get recent Celery task executions with summary by task type.
+
+    Cached for 15 seconds.
     """
-    tasks = db.execute(
-        select(TaskRun)
-        .order_by(TaskRun.started_at.desc())
-        .limit(limit)
-    ).scalars().all()
+    def compute_task_activity():
+        tasks = db.execute(
+            select(TaskRun)
+            .order_by(TaskRun.started_at.desc())
+            .limit(limit)
+        ).scalars().all()
 
-    # Group by task type for summary
-    by_task: dict = {}
-    for t in tasks:
-        name = t.task_name.split(".")[-1] if t.task_name else "unknown"
-        if name not in by_task:
-            by_task[name] = {"success": 0, "failed": 0, "running": 0}
-        by_task[name][t.status] = by_task[name].get(t.status, 0) + 1
+        # Group by task type for summary
+        by_task: dict = {}
+        for t in tasks:
+            name = t.task_name.split(".")[-1] if t.task_name else "unknown"
+            if name not in by_task:
+                by_task[name] = {"success": 0, "failed": 0, "running": 0}
+            by_task[name][t.status] = by_task[name].get(t.status, 0) + 1
 
-    return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "by_task": by_task,
-        "recent": [
-            {
-                "id": t.id,
-                "task": t.task_name.split(".")[-1] if t.task_name else "unknown",
-                "tier": t.tier,
-                "status": t.status,
-                "started_at": t.started_at.isoformat() if t.started_at else None,
-                "duration_ms": t.duration_ms,
-                "markets_processed": t.markets_processed,
-                "rows_inserted": t.rows_inserted,
-                "error": t.error_message[:100] if t.error_message else None,
-            }
-            for t in tasks
-        ],
-    }
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "by_task": by_task,
+            "recent": [
+                {
+                    "id": t.id,
+                    "task": t.task_name.split(".")[-1] if t.task_name else "unknown",
+                    "tier": t.tier,
+                    "status": t.status,
+                    "started_at": t.started_at.isoformat() if t.started_at else None,
+                    "duration_ms": t.duration_ms,
+                    "markets_processed": t.markets_processed,
+                    "rows_inserted": t.rows_inserted,
+                    "error": t.error_message[:100] if t.error_message else None,
+                }
+                for t in tasks
+            ],
+        }
+
+    return get_cached_or_compute(f"monitoring:task_activity:{limit}", 15, compute_task_activity)
 
 
 @router.get("/monitoring/redis-stats")
 async def get_redis_stats():
     """
     Get Redis memory, key counts, and connection info.
+
+    Cached for 30 seconds.
     """
-    import redis as redis_sync
-    from src.config.settings import settings
+    def compute_redis_stats():
+        r = redis_sync.from_url(settings.redis_url, decode_responses=True)
+        try:
+            info = r.info()
 
-    r = redis_sync.from_url(settings.redis_url, decode_responses=True)
-    try:
-        info = r.info()
+            # Count keys by pattern
+            key_patterns = {
+                "ws:*": len(r.keys("ws:*")),
+                "gamma:*": len(r.keys("gamma:*")),
+                "orderbook:*": len(r.keys("orderbook:*")),
+                "trade_buffer:*": len(r.keys("trade_buffer:*")),
+                "celery*": len(r.keys("celery*")),
+            }
 
-        # Count keys by pattern
-        key_patterns = {
-            "ws:*": len(r.keys("ws:*")),
-            "gamma:*": len(r.keys("gamma:*")),
-            "orderbook:*": len(r.keys("orderbook:*")),
-            "trade_buffer:*": len(r.keys("trade_buffer:*")),
-            "celery*": len(r.keys("celery*")),
-        }
+            return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "memory_used_mb": round(info.get("used_memory", 0) / 1024 / 1024, 1),
+                "memory_peak_mb": round(info.get("used_memory_peak", 0) / 1024 / 1024, 1),
+                "connected_clients": info.get("connected_clients", 0),
+                "total_keys": r.dbsize(),
+                "keys_by_pattern": key_patterns,
+                "uptime_seconds": info.get("uptime_in_seconds", 0),
+                "ops_per_sec": info.get("instantaneous_ops_per_sec", 0),
+            }
+        finally:
+            r.close()
 
-        return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "memory_used_mb": round(info.get("used_memory", 0) / 1024 / 1024, 1),
-            "memory_peak_mb": round(info.get("used_memory_peak", 0) / 1024 / 1024, 1),
-            "connected_clients": info.get("connected_clients", 0),
-            "total_keys": r.dbsize(),
-            "keys_by_pattern": key_patterns,
-            "uptime_seconds": info.get("uptime_in_seconds", 0),
-            "ops_per_sec": info.get("instantaneous_ops_per_sec", 0),
-        }
-    finally:
-        r.close()
+    return get_cached_or_compute("monitoring:redis_stats", 30, compute_redis_stats)
 
 
 @router.get("/monitoring/lifecycle-status")

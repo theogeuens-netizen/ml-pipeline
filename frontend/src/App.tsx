@@ -9,10 +9,12 @@ import Monitoring from './pages/Monitoring'
 import Database from './pages/Database'
 import Trading from './pages/Trading'
 import PayoffCalculator from './pages/PayoffCalculator'
+import CSGO from './pages/CSGO'
 
 const navLinks = [
   { path: '/', label: 'Dashboard' },
   { path: '/trading', label: 'Trading' },
+  { path: '/csgo', label: 'CS:GO' },
   { path: '/calculator', label: 'Calculator' },
   { path: '/markets', label: 'Markets' },
   { path: '/data-quality', label: 'Data Quality' },
@@ -63,6 +65,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/trading" element={<Trading />} />
+          <Route path="/csgo" element={<CSGO />} />
           <Route path="/calculator" element={<PayoffCalculator />} />
           <Route path="/markets" element={<Markets />} />
           <Route path="/markets/:id" element={<MarketDetail />} />

@@ -22,7 +22,7 @@ class MeanReversionStrategy(Strategy):
         **kwargs,
     ):
         self.name = name
-        self.version = "2.0.0"
+        self.version = "2.1.0"  # Fixed orderbook conversion for YES/NO
         self.std_threshold = std_threshold
         self.min_deviation_pct = min_deviation_pct
         self.lookback_hours = lookback_hours
@@ -82,8 +82,17 @@ class MeanReversionStrategy(Strategy):
             # Determine direction
             if z_score > 0:
                 token_id, side_desc = m.no_token_id, "NO"
+                # Convert YES orderbook to NO orderbook for correct execution pricing
+                no_price = 1 - m.price
+                signal_best_bid = (1 - m.best_ask) if m.best_ask is not None else None
+                signal_best_ask = (1 - m.best_bid) if m.best_bid is not None else no_price
+                signal_price = no_price
             else:
                 token_id, side_desc = m.yes_token_id, "YES"
+                # YES token - use YES orderbook directly
+                signal_best_bid = m.best_bid
+                signal_best_ask = m.best_ask if m.best_ask is not None else m.price
+                signal_price = m.price
 
             edge = deviation_pct * 0.5
             confidence = 0.4 + min(0.4, abs(z_score) / 5)
@@ -93,12 +102,12 @@ class MeanReversionStrategy(Strategy):
                 side=Side.BUY,
                 reason=f"{z_score:+.1f}σ from mean → buy {side_desc}",
                 market_id=m.id,
-                price_at_signal=m.price,
+                price_at_signal=signal_price,
                 edge=edge,
                 confidence=confidence,
                 size_usd=None,
-                best_bid=m.best_bid,
-                best_ask=m.best_ask,
+                best_bid=signal_best_bid,
+                best_ask=signal_best_ask,
                 strategy_name=self.name,
                 strategy_sha=self.get_sha(),
                 market_snapshot=m.snapshot,

@@ -20,7 +20,7 @@ class NewMarketStrategy(Strategy):
         **kwargs,
     ):
         self.name = name
-        self.version = "2.0.0"
+        self.version = "2.1.0"  # Fixed NO orderbook conversion
         self.min_no_probability = min_no_probability
         self.max_no_probability = max_no_probability
         self.min_hours_to_expiry = min_hours_to_expiry
@@ -55,17 +55,23 @@ class NewMarketStrategy(Strategy):
 
             confidence = 0.3 + min(0.3, edge)
 
+            # Convert YES orderbook to NO orderbook for correct execution pricing
+            # NO bid = 1 - YES ask, NO ask = 1 - YES bid
+            # Use no_prob as fallback for NO ask (since we BUY NO tokens)
+            no_best_bid = (1 - m.best_ask) if m.best_ask is not None else None
+            no_best_ask = (1 - m.best_bid) if m.best_bid is not None else no_prob
+
             yield Signal(
                 token_id=m.no_token_id,
                 side=Side.BUY,
                 reason=f"New market NO: {no_prob:.1%} < {self.assumed_no_rate:.0%} base rate",
                 market_id=m.id,
-                price_at_signal=m.price,
+                price_at_signal=no_prob,  # NO price, not YES price
                 edge=edge,
                 confidence=confidence,
                 size_usd=None,
-                best_bid=m.best_bid,
-                best_ask=m.best_ask,
+                best_bid=no_best_bid,
+                best_ask=no_best_ask,
                 strategy_name=self.name,
                 strategy_sha=self.get_sha(),
                 market_snapshot=m.snapshot,

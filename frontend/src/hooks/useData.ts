@@ -55,7 +55,7 @@ export function useHealth() {
   return useQuery({
     queryKey: ['health'],
     queryFn: api.getHealth,
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   })
 }
 
@@ -64,7 +64,7 @@ export function useMonitoringHealth() {
   return useQuery({
     queryKey: ['monitoringHealth'],
     queryFn: api.getMonitoringHealth,
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   })
 }
 
@@ -112,7 +112,7 @@ export function useTierTransitions(hours = 1) {
   return useQuery({
     queryKey: ['tierTransitions', hours],
     queryFn: () => api.getTierTransitions(hours),
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   })
 }
 
@@ -120,7 +120,7 @@ export function useTaskActivity(limit = 50) {
   return useQuery({
     queryKey: ['taskActivity', limit],
     queryFn: () => api.getTaskActivity(limit),
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   })
 }
 
@@ -128,7 +128,7 @@ export function useRedisStats() {
   return useQuery({
     queryKey: ['redisStats'],
     queryFn: api.getRedisStats,
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   })
 }
 
