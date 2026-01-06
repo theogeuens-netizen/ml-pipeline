@@ -1,4 +1,4 @@
-"""Uncertain Zone Strategy - Bet NO when YES is priced in uncertain zone (45-55%)."""
+"""Uncertain Zone Strategy - Bet in uncertain zone (45-55%) based on category-specific biases."""
 
 from typing import Iterator
 from strategies.base import Strategy, Signal, Side, MarketData
@@ -6,8 +6,10 @@ from strategies.base import Strategy, Signal, Side, MarketData
 
 class UncertainZoneStrategy(Strategy):
     """
-    Exploit behavioral bias where YES outcomes in the 45-55% price range
-    are systematically overpriced. Bet NO in the "uncertain zone".
+    Exploit behavioral biases in the 45-55% price zone.
+
+    Default: Bet NO (YES is overpriced in most categories)
+    With side="YES": Bet YES (for categories like CRYPTO where YES is underpriced)
 
     Based on exp-001/exp-002 analysis of 385K historical markets.
     Edge exists across all time windows. Uses after-spread edge for Kelly sizing.
@@ -21,7 +23,9 @@ class UncertainZoneStrategy(Strategy):
         min_hours: float = 1,
         max_hours: float = 4,
         min_volume: float = 0,  # No volume filter by default
-        expected_no_rate: float = 0.55,  # Conservative estimate
+        expected_no_rate: float = 0.55,  # Conservative estimate (ignored if side="YES")
+        expected_yes_rate: float = None,  # Used when side="YES"
+        side: str = "NO",  # "NO" (default) or "YES"
         min_edge_after_spread: float = 0.03,  # 3% minimum edge after spread
         max_spread: float = None,  # Optional: maximum spread to trade (e.g., 0.04 = 4%)
         categories: list = None,  # Optional: only trade these L1 categories
@@ -35,13 +39,15 @@ class UncertainZoneStrategy(Strategy):
         **kwargs,
     ):
         self.name = name
-        self.version = "2.4.0"  # Added L2/L3 category filtering
+        self.version = "2.5.0"  # Added side parameter for YES/NO bias
         self.yes_price_min = yes_price_min
         self.yes_price_max = yes_price_max
         self.min_hours = min_hours
         self.max_hours = max_hours
         self.min_volume = min_volume
+        self.side = side.upper()  # "YES" or "NO"
         self.expected_no_rate = expected_no_rate
+        self.expected_yes_rate = expected_yes_rate or (1 - expected_no_rate)  # Derive if not set
         self.min_edge_after_spread = min_edge_after_spread
         self.max_spread = max_spread
         self.categories = categories or []  # Empty = all categories
@@ -56,9 +62,13 @@ class UncertainZoneStrategy(Strategy):
 
     def scan(self, markets: list[MarketData]) -> Iterator[Signal]:
         for m in markets:
-            # Token check - need NO token
-            if not m.no_token_id:
-                continue
+            # Token check - need the token we're betting on
+            if self.side == "YES":
+                if not m.yes_token_id:
+                    continue
+            else:  # NO
+                if not m.no_token_id:
+                    continue
 
             # L1 Category filter
             if self.categories and m.category_l1 not in self.categories:
@@ -93,74 +103,75 @@ class UncertainZoneStrategy(Strategy):
             if yes_price < self.yes_price_min or yes_price > self.yes_price_max:
                 continue
 
-            # Spread filter (optional)
-            # Calculate spread from YES bid/ask, filter if too wide
+            # Calculate spread for filtering and logging
+            spread = None
             if m.best_bid is not None and m.best_ask is not None:
                 spread = m.best_ask - m.best_bid
                 if self.max_spread is not None and spread > self.max_spread:
                     continue  # Skip if spread too wide
 
-            # Calculate NO ask price (what we actually pay when buying NO)
-            # NO ask ≈ 1 - YES bid (we're crossing the spread on the YES side)
-            yes_bid = m.best_bid if m.best_bid is not None else yes_price
-            no_ask = 1 - yes_bid  # This is what we pay for NO tokens
+            # Calculate execution prices based on which side we're betting
+            if self.side == "YES":
+                # Betting YES: we buy at YES ask price
+                yes_ask = m.best_ask if m.best_ask is not None else yes_price
+                execution_price = yes_ask
+                expected_rate = self.expected_yes_rate
+                token_id = m.yes_token_id
+                # YES orderbook is native
+                best_bid = m.best_bid
+                best_ask = m.best_ask if m.best_ask is not None else execution_price
+            else:
+                # Betting NO: we buy at NO ask = 1 - YES bid
+                yes_bid = m.best_bid if m.best_bid is not None else yes_price
+                execution_price = 1 - yes_bid  # NO ask price
+                expected_rate = self.expected_no_rate
+                token_id = m.no_token_id
+                # Convert to NO orderbook
+                best_bid = 1 - m.best_ask if m.best_ask is not None else None
+                best_ask = 1 - m.best_bid if m.best_bid is not None else execution_price
 
-            if no_ask <= 0 or no_ask >= 1:
+            if execution_price <= 0 or execution_price >= 1:
                 continue
 
             # Edge calculation AFTER spread:
-            # - We BUY NO tokens at price `no_ask` (not mid-price)
-            # - If NO wins, we get $1 per share
-            # - Expected value = expected_no_rate * $1 = expected_no_rate
-            # - Cost = no_ask (actual execution price)
+            # - We BUY tokens at `execution_price` (not mid-price)
+            # - If we win, we get $1 per share
+            # - Expected value = expected_rate * $1
+            # - Cost = execution_price
             # - Edge = (EV - Cost) / Cost
-            #
-            # Example: expected_no_rate=57%, yes_bid=49%, no_ask=51%
-            # Edge = (0.57 - 0.51) / 0.51 = 11.8% expected return
-            #
-            # This is the REAL edge after paying the spread.
-            edge_after_spread = (self.expected_no_rate - no_ask) / no_ask
+            edge_after_spread = (expected_rate - execution_price) / execution_price
 
             if edge_after_spread < self.min_edge_after_spread:
                 continue  # Skip if edge < 3% (default threshold)
 
             # Confidence = expected win rate (used for Kelly sizing)
-            confidence = self.expected_no_rate
+            confidence = expected_rate
 
-            # Calculate spread for logging
-            spread = None
-            if m.best_bid is not None and m.best_ask is not None:
-                spread = m.best_ask - m.best_bid
-
-            # Convert YES orderbook to NO orderbook for correct execution pricing
-            # NO bid = 1 - YES ask (someone buying NO = someone selling YES)
-            # NO ask = 1 - YES bid (someone selling NO = someone buying YES)
-            # Use no_ask (already calculated correctly) as fallback for NO ask
-            no_best_bid = 1 - m.best_ask if m.best_ask is not None else None
-            no_best_ask = 1 - m.best_bid if m.best_bid is not None else no_ask
-
+            side_label = self.side
+            no_price = 1 - yes_price
             yield Signal(
-                token_id=m.no_token_id,
+                token_id=token_id,
                 side=Side.BUY,
-                reason=f"UncertainZone: YES@{yes_price:.1%}, NO@{no_ask:.1%}, edge={edge_after_spread:.1%}",
+                reason=f"UncertainZone({side_label}): YES@{yes_price:.1%}, NO@{no_price:.1%}, edge={edge_after_spread:.1%}",
                 market_id=m.id,
-                price_at_signal=no_ask,  # NO price, not YES price
-                edge=edge_after_spread,  # After-spread edge for Kelly sizing
+                price_at_signal=execution_price,
+                edge=edge_after_spread,
                 confidence=confidence,
                 size_usd=None,
-                best_bid=no_best_bid,    # NO orderbook, not YES
-                best_ask=no_best_ask,    # NO orderbook, not YES
+                best_bid=best_bid,
+                best_ask=best_ask,
                 strategy_name=self.name,
                 strategy_sha=self.get_sha(),
                 market_snapshot=m.snapshot,
                 decision_inputs={
                     "yes_price": yes_price,
-                    "no_ask": no_ask,
+                    "side": self.side,
+                    "execution_price": execution_price,
                     "edge_after_spread": edge_after_spread,
                     "spread": spread,
                     "hours_to_close": m.hours_to_close,
-                    "expected_no_rate": self.expected_no_rate,
-                    "size_pct": self.size_pct,  # Per-strategy sizing
+                    "expected_rate": expected_rate,
+                    "size_pct": self.size_pct,
                 },
             )
 

@@ -14,7 +14,7 @@ Usage:
     python scripts/export_to_gcs.py --dry-run          # Preview without uploading
 
 Structure:
-    gs://longshot-lake/curated/{table}/{date}/{table}_{date}.csv.gz
+    gs://polymarket-backup/curated/{table}/{date}/{table}_{date}.csv.gz
 """
 
 import os
@@ -38,7 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-GCS_BUCKET = "longshot-lake"
+GCS_BUCKET = "polymarket-backup"
 GCS_PREFIX = "curated"
 
 # Parse database URL components for psycopg2
@@ -91,6 +91,33 @@ TABLES = {
         "timestamp_col": "published_at",
         "order_by": "id",
     },
+    # Strategy execution tables (added for complete backup)
+    "trade_decisions": {
+        "timestamp_col": "timestamp",
+        "order_by": "id",
+    },
+    "signals": {
+        "timestamp_col": "created_at",
+        "order_by": "id",
+    },
+    "positions": {
+        "timestamp_col": "updated_at",
+        "order_by": "id",
+    },
+    # Market lifecycle tracking
+    "tier_transitions": {
+        "timestamp_col": "transitioned_at",
+        "order_by": "id",
+    },
+    # CSGO trading data
+    "csgo_price_ticks": {
+        "timestamp_col": "timestamp",
+        "order_by": "id",
+    },
+    "csgo_matches": {
+        "timestamp_col": "updated_at",
+        "order_by": "id",
+    },
 }
 
 
@@ -128,42 +155,130 @@ def get_gcs_client() -> storage.Client:
     return storage.Client()
 
 
+class ChunkedUploadBuffer:
+    """
+    File-like object that uploads chunks to GCS as data is written.
+
+    Used as the target for gzip.GzipFile to enable true streaming.
+    Memory usage is bounded to ~CHUNK_SIZE regardless of data size.
+    """
+
+    def __init__(self, upload_url: str, blob_name: str):
+        self.upload_url = upload_url
+        self.blob_name = blob_name
+        self.buffer = BytesIO()
+        self.bytes_uploaded = 0
+        self.total_written = 0
+
+    def write(self, data: bytes) -> int:
+        """Write data to buffer, flushing to GCS when full."""
+        self.buffer.write(data)
+        self.total_written += len(data)
+
+        # Flush when buffer exceeds chunk size
+        while self.buffer.tell() >= CHUNK_SIZE:
+            self._upload_chunk(final=False)
+
+        return len(data)
+
+    def _upload_chunk(self, final: bool = False):
+        """Upload buffered data as a chunk to GCS."""
+        import requests
+
+        chunk_size = self.buffer.tell()
+        if chunk_size == 0 and not final:
+            return
+
+        self.buffer.seek(0)
+        chunk_data = self.buffer.read(CHUNK_SIZE) if not final else self.buffer.read()
+        actual_chunk_size = len(chunk_data)
+
+        if actual_chunk_size == 0:
+            # Handle empty final chunk
+            if final:
+                # Send zero-length final request
+                headers = {
+                    'Content-Length': '0',
+                    'Content-Range': f"bytes */{self.bytes_uploaded}",
+                }
+                requests.put(self.upload_url, data=b'', headers=headers, timeout=300)
+            return
+
+        start_byte = self.bytes_uploaded
+        end_byte = start_byte + actual_chunk_size - 1
+
+        if final:
+            total_size = self.bytes_uploaded + actual_chunk_size
+            content_range = f"bytes {start_byte}-{end_byte}/{total_size}"
+        else:
+            content_range = f"bytes {start_byte}-{end_byte}/*"
+
+        headers = {
+            'Content-Length': str(actual_chunk_size),
+            'Content-Range': content_range,
+        }
+
+        response = requests.put(
+            self.upload_url,
+            data=chunk_data,
+            headers=headers,
+            timeout=300,
+        )
+
+        # 308 = Resume Incomplete, 200/201 = Complete
+        if response.status_code not in (200, 201, 308):
+            raise Exception(f"Upload failed: {response.status_code} - {response.text}")
+
+        self.bytes_uploaded += actual_chunk_size
+
+        # Keep remaining data in buffer
+        remaining = self.buffer.read()
+        self.buffer = BytesIO()
+        self.buffer.write(remaining)
+
+    def flush(self):
+        """Flush is called by gzip - upload if we have enough data."""
+        if self.buffer.tell() >= CHUNK_SIZE:
+            self._upload_chunk(final=False)
+
+    def close(self):
+        """Upload any remaining data as final chunk."""
+        self._upload_chunk(final=True)
+
+
 class StreamingGzipUploader:
     """
-    Streams data through gzip compression directly to GCS.
-    Uses resumable upload with chunked writes.
+    TRUE streaming upload to GCS with bounded memory usage.
+
+    Uses GCS resumable uploads to stream compressed data in chunks.
+    Memory usage is bounded to ~CHUNK_SIZE (5MB) regardless of table size.
     """
 
     def __init__(self, bucket: storage.Bucket, blob_name: str):
         self.blob = bucket.blob(blob_name)
-        self.buffer = BytesIO()
-        self.gzip_file = gzip.GzipFile(mode='wb', fileobj=self.buffer)
-        self.total_bytes = 0
         self.blob_name = blob_name
 
-    def write(self, data: bytes):
-        """Write data to gzip buffer."""
-        self.gzip_file.write(data)
-        self.total_bytes += len(data)
-
-    def finish(self) -> tuple[int, int]:
-        """Finalize gzip and upload to GCS. Returns (uncompressed, compressed) bytes."""
-        self.gzip_file.close()
-
-        # Get compressed size before seeking
-        compressed_size = self.buffer.tell()
-        self.buffer.seek(0)
-
-        # Upload the complete gzipped data
-        self.blob.upload_from_file(
-            self.buffer,
+        # Initialize resumable upload session
+        upload_url = self.blob.create_resumable_upload_session(
             content_type='application/gzip',
-            timeout=600,  # 10 min timeout for large files
+            timeout=60,
         )
 
+        # Create chunked upload buffer that streams to GCS
+        self.upload_buffer = ChunkedUploadBuffer(upload_url, blob_name)
+
+        # Gzip writes to the chunked buffer, which uploads to GCS
+        self.gzip_file = gzip.GzipFile(mode='wb', fileobj=self.upload_buffer)
+
+    def finish(self) -> tuple[int, int]:
+        """Finalize gzip and upload remaining data to GCS."""
+        self.gzip_file.close()  # Flushes gzip compression
+        self.upload_buffer.close()  # Upload final chunk to GCS
+
+        compressed = self.upload_buffer.bytes_uploaded
         logger.info(f"  Uploaded: gs://{GCS_BUCKET}/{self.blob_name} "
-                   f"({compressed_size:,} bytes compressed)")
-        return compressed_size, compressed_size
+                   f"({compressed:,} bytes compressed)")
+        return self.upload_buffer.total_written, compressed
 
 
 def export_table_streaming(

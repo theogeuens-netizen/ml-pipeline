@@ -107,6 +107,79 @@ uncertain_zone:
     # Analysis: analysis-001 (Jan 2026)
 
   # =========================================================================
+  # P0 OPTIMIZATION V2: Full optimization based on analysis-002 (Jan 5, 2026)
+  # Combines all proven filters:
+  # - YES > 0.50 only (NO < 0.50): Edge only exists when YES slightly favored
+  # - Exclude CRYPTO/SPORTS/WEATHER/OTHER: Zero or negative edge categories
+  # - Exclude MAP_WINNER L3: Reverse bias on individual map bets
+  # Backtest: 72.1% WR, $1.62/trade (vs $0.82 baseline = +96% improvement)
+  # 2% sizing to offset ~40% fewer trades (122 vs 211)
+  # =========================================================================
+  - name: no_bias_tight_2h_filtered_v2
+    yes_price_min: 0.50            # CHANGED: Only trade when YES >= 0.50 (NO <= 0.50)
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    size_pct: 0.02                 # 2% per trade (2x default, fewer opportunities)
+    excluded_categories:
+      - CRYPTO       # 45.9% WR, -$143 P&L - NO bias is REVERSED in crypto
+      - SPORTS       # 54.1% WR, marginal - exclude for cleaner signal
+      - WEATHER      # 0% WR, pure drain
+      - OTHER        # 0% WR, pure drain
+    excluded_l3_categories:
+      - MAP_WINNER   # 44-46% WR, reverse bias on individual maps vs series
+    # Analysis: analysis-002 (Jan 5, 2026)
+    # Expected: 72%+ WR, $1.62/trade, ~12 trades/day
+
+  # =========================================================================
+  # ESPORTS SPECIALIST: Concentrated bet on strongest edge segment
+  # ESPORTS L1 shows 68% WR, $1.25/trade in no_bias_tight_2h_no_crypto_sports
+  # Key insight: MATCH_WINNER/MAPS_TOTAL variants: 64-100% WR
+  #              MAP_WINNER variants: 44-46% WR (reverse bias)
+  # 3% sizing for high-conviction, concentrated exposure
+  # =========================================================================
+  - name: no_bias_esports_2h
+    yes_price_min: 0.50            # Only YES >= 0.50 (proven edge zone)
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.58         # Higher rate for ESPORTS (68% observed WR)
+    size_pct: 0.03                 # 3% per trade (high conviction)
+    categories:
+      - ESPORTS                    # Only trade ESPORTS
+    excluded_l3_categories:
+      - MAP_WINNER                 # 44-46% WR, reverse bias on individual maps
+    # Analysis: analysis-002 (Jan 5, 2026)
+    # Based on: ESPORTS in no_bias_tight_2h_no_crypto_sports
+    # Strong L2s: CSGO (64% WR), HONOR_OF_KINGS (100%), DOTA2 (67%), LOL (75%)
+    # Expected: 70%+ WR, ~10-15 trades/day
+
+  # =========================================================================
+  # YES BIAS CRYPTO: Exploit reverse bias in crypto direction markets
+  # Analysis-002 (Jan 5, 2026):
+  # - CRYPTO shows REVERSED bias: YES wins 54.1% vs 45.9% for NO
+  # - Hypothetical YES P&L: +$120.59 vs actual NO P&L: -$143.08
+  # - Edge strongest when YES is underdog (0.48-0.49): 53% WR, $0.22/trade
+  # - Higher edge in 0.49-0.50: 61.4% WR, $0.59/trade
+  # Cause: Crypto traders bet against trend (mean reversion bias), but momentum wins
+  # =========================================================================
+  - name: yes_bias_crypto_2h
+    side: "YES"                    # BET YES (not NO)
+    yes_price_min: 0.48            # YES underdog zone
+    yes_price_max: 0.50            # Up to 50%
+    min_hours: 2
+    max_hours: 4
+    expected_yes_rate: 0.55        # 55% YES win rate (observed 54-61%)
+    size_pct: 0.02                 # 2% per trade
+    categories:
+      - CRYPTO                     # Only CRYPTO (this is where YES bias exists)
+    # Analysis: analysis-002 (Jan 5, 2026)
+    # Based on: 455 CRYPTO trades in no_bias_tight_2h showing reverse bias
+    # Strong L2s: XRP (56.1% YES WR), ETHEREUM (55.4%), BITCOIN (54.7%)
+    # Expected: 55%+ YES WR, ~$0.30-0.50/trade, high volume
+
+  # =========================================================================
   # GROUP B: Underdog NO (YES 0.55-0.70, so NO is 0.30-0.45)
   # Buy cheap NO tokens expecting them to win more than priced
   # =========================================================================

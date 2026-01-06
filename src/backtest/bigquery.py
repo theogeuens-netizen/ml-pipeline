@@ -44,7 +44,7 @@ from google.cloud import bigquery
 # =============================================================================
 
 # BigQuery project and dataset
-BQ_PROJECT = "elite-buttress-480609-b0"
+BQ_PROJECT = "polymarket-ml"
 BQ_DATASET = "longshot"
 BQ_LOCATION = "EU"
 
@@ -135,6 +135,17 @@ def get_bq_client() -> bigquery.Client:
     The client is cached to avoid repeated authentication overhead.
     Location is set to EU where the dataset resides.
     """
+    import os
+    credentials_path = os.getenv(
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "/home/theo/polymarket-ml/gcp-credentials.json"
+    )
+    if os.path.exists(credentials_path):
+        return bigquery.Client.from_service_account_json(
+            credentials_path,
+            project=BQ_PROJECT,
+            location=BQ_LOCATION
+        )
     return bigquery.Client(project=BQ_PROJECT, location=BQ_LOCATION)
 
 

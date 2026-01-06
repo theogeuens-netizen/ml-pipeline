@@ -89,6 +89,12 @@ def load_strategies():
     except ImportError as e:
         logger.warning(f"Could not load CSGOMapLongshotStrategy: {e}")
 
+    try:
+        from src.csgo.strategies.bo3_longshot import CSGOB03LongshotStrategy
+        strategies.append(CSGOB03LongshotStrategy(state_manager))
+    except ImportError as e:
+        logger.warning(f"Could not load CSGOB03LongshotStrategy: {e}")
+
     # Filter by enabled list if specified
     enabled = get_enabled_strategies()
     if enabled:

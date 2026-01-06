@@ -18,7 +18,7 @@ import yaml
 from google.cloud import bigquery
 
 # BigQuery config
-PROJECT_ID = "elite-buttress-480609-b0"
+PROJECT_ID = "polymarket-ml"
 DATASET = "longshot"
 MARKETS_TABLE = f"{PROJECT_ID}.{DATASET}.historical_markets"
 SNAPSHOTS_TABLE = f"{PROJECT_ID}.{DATASET}.historical_snapshots"

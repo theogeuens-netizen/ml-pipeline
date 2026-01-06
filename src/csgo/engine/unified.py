@@ -489,7 +489,7 @@ class UnifiedCSGOEngine:
             return {
                 "yes_price": float(match.yes_price),
                 "no_price": float(match.no_price) if match.no_price else 1 - float(match.yes_price),
-                "spread": float(match.spread) if match.spread else 0.02,
+                "spread": float(match.spread) if match.spread else None,  # Don't fake spread - let strategies handle NULL
                 "yes_token_id": market.yes_token_id if market else None,
                 "no_token_id": market.no_token_id if market else None,
             }
@@ -697,6 +697,7 @@ async def run_unified_engine() -> None:
     from src.csgo.strategies.favorite_hedge import CSGOFavoriteHedgeStrategy
     from src.csgo.strategies.swing_rebalance import CSGOSwingRebalanceStrategy
     from src.csgo.strategies.map_longshot import CSGOMapLongshotStrategy
+    from src.csgo.strategies.bo3_longshot import CSGOB03LongshotStrategy
 
     engine = UnifiedCSGOEngine()
 
@@ -705,6 +706,7 @@ async def run_unified_engine() -> None:
     engine.register_strategy(CSGOFavoriteHedgeStrategy())
     engine.register_strategy(CSGOSwingRebalanceStrategy())
     engine.register_strategy(CSGOMapLongshotStrategy())
+    engine.register_strategy(CSGOB03LongshotStrategy())
 
     # Handle shutdown
     def handle_shutdown(signum, frame):

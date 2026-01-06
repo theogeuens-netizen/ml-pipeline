@@ -49,6 +49,9 @@ class CSGOSwingRebalanceStrategy(CSGOStrategy):
     entry_minutes_max = 15.0   # 15 min after game start
     entry_price_min = 0.40   # Skip if outside this range
     entry_price_max = 0.60
+    max_spread = 0.05            # Only enter if spread <= 5%
+    extreme_price_min = 0.10     # Skip if YES below 10% (near resolution)
+    extreme_price_max = 0.90     # Skip if YES above 90% (near resolution)
     position_size = 20.0             # USD per leg
 
     # Trigger threshold
@@ -90,6 +93,25 @@ class CSGOSwingRebalanceStrategy(CSGOStrategy):
 
         yes_price = tick.yes_price
         if not yes_price:
+            return None
+
+        # Skip if market is near resolution (extreme prices)
+        if yes_price < self.extreme_price_min or yes_price > self.extreme_price_max:
+            logger.info(
+                f"[{self.name}] SKIP: {tick.team_yes} vs {tick.team_no} @ {yes_price:.2%} "
+                f"(extreme price - near resolution)"
+            )
+            self._market_states[market_id] = {"skipped": True}
+            return None
+
+        # Skip if spread is too wide or unknown
+        if tick.spread is None or tick.spread > self.max_spread:
+            spread_str = f"{tick.spread:.1%}" if tick.spread is not None else "unknown"
+            logger.info(
+                f"[{self.name}] SKIP: {tick.team_yes} vs {tick.team_no} - "
+                f"spread {spread_str} > {self.max_spread:.0%}"
+            )
+            self._market_states[market_id] = {"skipped": True}
             return None
 
         # Skip if price outside balanced range

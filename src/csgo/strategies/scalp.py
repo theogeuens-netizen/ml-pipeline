@@ -64,9 +64,12 @@ class CSGOScalpStrategy(CSGOStrategy):
     def __init__(self, state_manager=None):
         """Initialize scalp strategy."""
         super().__init__(state_manager)
-        # Track per-market state
-        self._entry_prices = {}  # market_id -> entry_yes_price
-        self._entry_times = {}   # market_id -> entry_timestamp
+        # Track per-market state with SEPARATE baselines for YES and NO
+        # This prevents cascading partial closes - each side tracks its own baseline
+        self._yes_baselines = {}  # market_id -> YES price baseline for triggers
+        self._no_baselines = {}   # market_id -> NO price baseline for triggers
+        self._entry_prices = {}   # market_id -> original entry_yes_price (for reference)
+        self._entry_times = {}    # market_id -> entry_timestamp
 
     def on_tick(self, tick: Tick) -> Optional[Action]:
         """
@@ -108,7 +111,10 @@ class CSGOScalpStrategy(CSGOStrategy):
         )
 
         # Store entry price and time for exit logic
+        # Initialize SEPARATE baselines for YES and NO sides
         self._entry_prices[tick.market_id] = yes_price
+        self._yes_baselines[tick.market_id] = yes_price      # YES baseline starts at entry
+        self._no_baselines[tick.market_id] = 1 - yes_price   # NO baseline starts at entry
         self._entry_times[tick.market_id] = datetime.now(timezone.utc)
 
         return Action(
@@ -133,7 +139,7 @@ class CSGOScalpStrategy(CSGOStrategy):
         if not yes_price:
             return None
 
-        # Get entry price
+        # Get entry price and initialize baselines if needed
         entry_price = self._entry_prices.get(tick.market_id)
         if not entry_price:
             # Try to get from spread (now returns dict)
@@ -145,14 +151,18 @@ class CSGOScalpStrategy(CSGOStrategy):
                 # Can't manage without knowing entry
                 return None
 
+        # Initialize baselines if not set (for existing positions)
+        if tick.market_id not in self._yes_baselines:
+            self._yes_baselines[tick.market_id] = entry_price
+        if tick.market_id not in self._no_baselines:
+            self._no_baselines[tick.market_id] = 1 - entry_price
+
         # Check minimum hold time - don't exit too quickly (avoid noise)
         entry_time = self._entry_times.get(tick.market_id)
         if entry_time:
             elapsed = (datetime.now(timezone.utc) - entry_time).total_seconds()
             if elapsed < self.min_hold_seconds:
                 return None  # Still in hold period
-
-        price_change = yes_price - entry_price
 
         # Check spread before any exit action
         spread_ok = tick.spread is None or tick.spread <= self.max_exit_spread
@@ -166,9 +176,11 @@ class CSGOScalpStrategy(CSGOStrategy):
             logger.info(
                 f"[{self.name}] Extreme reached: {yes_price:.2%}, closing spread"
             )
-            # Clean up tracking
+            # Clean up all tracking
             self._entry_prices.pop(tick.market_id, None)
             self._entry_times.pop(tick.market_id, None)
+            self._yes_baselines.pop(tick.market_id, None)
+            self._no_baselines.pop(tick.market_id, None)
 
             return Action(
                 action_type=ActionType.CLOSE,
@@ -186,38 +198,50 @@ class CSGOScalpStrategy(CSGOStrategy):
             )
             return None
 
-        # Check for significant move - partial sell winner
-        if abs(price_change) >= self.jump_threshold:
-            if price_change > 0:
-                # YES jumped up - sell some YES
-                logger.info(
-                    f"[{self.name}] YES jumped +{price_change:.2%}, selling partial"
-                )
-                return Action(
-                    action_type=ActionType.PARTIAL_CLOSE,
-                    market_id=tick.market_id,
-                    condition_id=tick.condition_id,
-                    token_type="YES",
-                    close_pct=self.partial_close_pct,
-                    strategy_name=self.name,
-                    reason=f"{self.name}: YES jump +{price_change:.2%}",
-                    trigger_price=yes_price,
-                )
-            else:
-                # NO jumped up (YES went down) - sell some NO
-                logger.info(
-                    f"[{self.name}] NO jumped +{abs(price_change):.2%}, selling partial"
-                )
-                return Action(
-                    action_type=ActionType.PARTIAL_CLOSE,
-                    market_id=tick.market_id,
-                    condition_id=tick.condition_id,
-                    token_type="NO",
-                    close_pct=self.partial_close_pct,
-                    strategy_name=self.name,
-                    reason=f"{self.name}: NO jump +{abs(price_change):.2%}",
-                    trigger_price=yes_price,
-                )
+        # Use SEPARATE baselines for YES and NO to prevent cascading
+        # Each side only triggers when it moves 10pt from ITS OWN baseline
+        yes_baseline = self._yes_baselines.get(tick.market_id, entry_price)
+        no_baseline = self._no_baselines.get(tick.market_id, 1 - entry_price)
+        no_price = 1 - yes_price
+
+        yes_change = yes_price - yes_baseline  # Positive = YES jumped up
+        no_change = no_price - no_baseline     # Positive = NO jumped up (YES dropped)
+
+        # Check YES side - did YES jump up from YES baseline?
+        if yes_change >= self.jump_threshold:
+            logger.info(
+                f"[{self.name}] YES jumped +{yes_change:.2%} (from baseline {yes_baseline:.2%}), selling partial"
+            )
+            # Reset YES baseline to current price - next trigger needs another 10pt move
+            self._yes_baselines[tick.market_id] = yes_price
+            return Action(
+                action_type=ActionType.PARTIAL_CLOSE,
+                market_id=tick.market_id,
+                condition_id=tick.condition_id,
+                token_type="YES",
+                close_pct=self.partial_close_pct,
+                strategy_name=self.name,
+                reason=f"{self.name}: YES jump +{yes_change:.2%} from {yes_baseline:.2%}",
+                trigger_price=yes_price,
+            )
+
+        # Check NO side - did NO jump up from NO baseline?
+        if no_change >= self.jump_threshold:
+            logger.info(
+                f"[{self.name}] NO jumped +{no_change:.2%} (from baseline {no_baseline:.2%}), selling partial"
+            )
+            # Reset NO baseline to current price - next trigger needs another 10pt move
+            self._no_baselines[tick.market_id] = no_price
+            return Action(
+                action_type=ActionType.PARTIAL_CLOSE,
+                market_id=tick.market_id,
+                condition_id=tick.condition_id,
+                token_type="NO",
+                close_pct=self.partial_close_pct,
+                strategy_name=self.name,
+                reason=f"{self.name}: NO jump +{no_change:.2%} from {no_baseline:.2%}",
+                trigger_price=yes_price,
+            )
 
         return None
 
@@ -234,5 +258,7 @@ class CSGOScalpStrategy(CSGOStrategy):
             "partial_close_pct": self.partial_close_pct,
             "extreme_threshold": self.extreme_threshold,
             "tracked_entries": len(self._entry_prices),
+            "yes_baselines": len(self._yes_baselines),
+            "no_baselines": len(self._no_baselines),
         })
         return base
