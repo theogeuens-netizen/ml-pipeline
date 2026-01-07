@@ -1,0 +1,1573 @@
+{
+  "experiment_id": "exp-002",
+  "run_at": "2025-12-23T10:42:45.987491+00:00",
+  "variants": [
+    {
+      "id": "v1",
+      "name": "time_1h_4h",
+      "params": {
+        "min_hours": 1,
+        "max_hours": 4,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 4.86,
+        "win_rate": 0.5566,
+        "profit_factor": 1.26,
+        "total_trades": 3446,
+        "total_pnl": 3908.28,
+        "max_drawdown_pct": 9.81
+      },
+      "historical_wr": {
+        "win_rate": 0.5565873476494486,
+        "total": 3446,
+        "wins": 1918,
+        "losses": 1528
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 4.784720762586838,
+            "win_rate": 0.575159605339524,
+            "trades": 1723
+          },
+          "second_half": {
+            "sharpe": 6.189090909029374,
+            "win_rate": 0.5380150899593732,
+            "trades": 1723
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 3.117954216113052,
+            "win_rate": 0.5362739408009286,
+            "trades": 1723
+          },
+          "low_volume": {
+            "sharpe": 3.9831365504874823,
+            "win_rate": 0.5769007544979686,
+            "trades": 1723
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 4.856558499256292,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5565873476494486,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 3446,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.2557772686709554,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v2",
+      "name": "time_4h_12h",
+      "params": {
+        "min_hours": 4,
+        "max_hours": 12,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 5.59,
+        "win_rate": 0.5671,
+        "profit_factor": 1.31,
+        "total_trades": 5151,
+        "total_pnl": 6931.06,
+        "max_drawdown_pct": 9.33
+      },
+      "historical_wr": {
+        "win_rate": 0.5670743544942729,
+        "total": 5151,
+        "wins": 2921,
+        "losses": 2230
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 4.976026315957082,
+            "win_rate": 0.5689320388349515,
+            "trades": 2575
+          },
+          "second_half": {
+            "sharpe": 7.884120761528193,
+            "win_rate": 0.5652173913043478,
+            "trades": 2576
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 2.909461886879616,
+            "win_rate": 0.531444099378882,
+            "trades": 2576
+          },
+          "low_volume": {
+            "sharpe": 6.132335838434233,
+            "win_rate": 0.6027184466019417,
+            "trades": 2575
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 5.588304632657059,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5670743544942729,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 5151,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3108096459560212,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v3",
+      "name": "time_12h_36h",
+      "params": {
+        "min_hours": 12,
+        "max_hours": 36,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 8.57,
+        "win_rate": 0.5775,
+        "profit_factor": 1.37,
+        "total_trades": 4630,
+        "total_pnl": 7163.92,
+        "max_drawdown_pct": 5.21
+      },
+      "historical_wr": {
+        "win_rate": 0.5775377969762419,
+        "total": 4630,
+        "wins": 2674,
+        "losses": 1956
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 8.04351742389248,
+            "win_rate": 0.5883369330453564,
+            "trades": 2315
+          },
+          "second_half": {
+            "sharpe": 9.810996280043472,
+            "win_rate": 0.5667386609071274,
+            "trades": 2315
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 2.5962718065314565,
+            "win_rate": 0.5252699784017278,
+            "trades": 2315
+          },
+          "low_volume": {
+            "sharpe": 9.728569719267211,
+            "win_rate": 0.629805615550756,
+            "trades": 2315
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 8.566881729487037,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5775377969762419,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 4630,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3662533712126734,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v4",
+      "name": "time_24h_72h",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 7.43,
+        "win_rate": 0.5724,
+        "profit_factor": 1.34,
+        "total_trades": 3361,
+        "total_pnl": 4879.62,
+        "max_drawdown_pct": 5.78
+      },
+      "historical_wr": {
+        "win_rate": 0.572448675989289,
+        "total": 3361,
+        "wins": 1924,
+        "losses": 1437
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 6.706390667627581,
+            "win_rate": 0.5803571428571429,
+            "trades": 1680
+          },
+          "second_half": {
+            "sharpe": 10.031300853189272,
+            "win_rate": 0.5645449137418204,
+            "trades": 1681
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 2.8692544240807356,
+            "win_rate": 0.5342058298631767,
+            "trades": 1681
+          },
+          "low_volume": {
+            "sharpe": 8.48316741956846,
+            "win_rate": 0.6107142857142858,
+            "trades": 1680
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 7.4297521233697,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.572448675989289,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 3361,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3395699045264085,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v5",
+      "name": "time_36h_96h",
+      "params": {
+        "min_hours": 36,
+        "max_hours": 96,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 6.95,
+        "win_rate": 0.5703,
+        "profit_factor": 1.33,
+        "total_trades": 3838,
+        "total_pnl": 5520.85,
+        "max_drawdown_pct": 7.1
+      },
+      "historical_wr": {
+        "win_rate": 0.5703491401771756,
+        "total": 3838,
+        "wins": 2189,
+        "losses": 1649
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 6.167976270710882,
+            "win_rate": 0.5773840541948931,
+            "trades": 1919
+          },
+          "second_half": {
+            "sharpe": 11.142030931275883,
+            "win_rate": 0.563314226159458,
+            "trades": 1919
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 2.35926186286654,
+            "win_rate": 0.5294424179260031,
+            "trades": 1919
+          },
+          "low_volume": {
+            "sharpe": 9.588713504140811,
+            "win_rate": 0.6112558624283481,
+            "trades": 1919
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.945155405501449,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5703491401771756,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 3838,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3347997849122841,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v6",
+      "name": "time_72h_168h",
+      "params": {
+        "min_hours": 72,
+        "max_hours": 168,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 7.54,
+        "win_rate": 0.5862,
+        "profit_factor": 1.42,
+        "total_trades": 5677,
+        "total_pnl": 9925.35,
+        "max_drawdown_pct": 12.17
+      },
+      "historical_wr": {
+        "win_rate": 0.586225118900828,
+        "total": 5677,
+        "wins": 3328,
+        "losses": 2349
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 6.07804952087254,
+            "win_rate": 0.5662438336856942,
+            "trades": 2838
+          },
+          "second_half": {
+            "sharpe": 15.845683132009711,
+            "win_rate": 0.6061993659739345,
+            "trades": 2839
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 2.9684725016191047,
+            "win_rate": 0.5357520253610426,
+            "trades": 2839
+          },
+          "low_volume": {
+            "sharpe": 10.181935927574596,
+            "win_rate": 0.6367159971811135,
+            "trades": 2838
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 7.5392938387555875,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.586225118900828,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 5677,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.4225349830673264,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v7",
+      "name": "price_48_52",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.48,
+        "yes_price_max": 0.52,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 6.97,
+        "win_rate": 0.5835,
+        "profit_factor": 1.4,
+        "total_trades": 1952,
+        "total_pnl": 3247.56,
+        "max_drawdown_pct": 5.54
+      },
+      "historical_wr": {
+        "win_rate": 0.5835040983606558,
+        "total": 1952,
+        "wins": 1139,
+        "losses": 813
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 6.51155497761731,
+            "win_rate": 0.6004098360655737,
+            "trades": 976
+          },
+          "second_half": {
+            "sharpe": 8.591489117723869,
+            "win_rate": 0.5665983606557377,
+            "trades": 976
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 3.565979206139378,
+            "win_rate": 0.5502049180327869,
+            "trades": 976
+          },
+          "low_volume": {
+            "sharpe": 8.225384579212392,
+            "win_rate": 0.6168032786885246,
+            "trades": 976
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.971402333590479,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5835040983606558,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 1952,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.399453294565666,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v8",
+      "name": "price_47_53",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.47,
+        "yes_price_max": 0.53,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 6.87,
+        "win_rate": 0.5767,
+        "profit_factor": 1.36,
+        "total_trades": 2433,
+        "total_pnl": 3752.25,
+        "max_drawdown_pct": 6.8
+      },
+      "historical_wr": {
+        "win_rate": 0.5766543362104398,
+        "total": 2433,
+        "wins": 1403,
+        "losses": 1030
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 6.353735440872147,
+            "win_rate": 0.5896381578947368,
+            "trades": 1216
+          },
+          "second_half": {
+            "sharpe": 8.757504486768783,
+            "win_rate": 0.5636811832374692,
+            "trades": 1217
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 3.2378679466880684,
+            "win_rate": 0.543138866064092,
+            "trades": 1217
+          },
+          "low_volume": {
+            "sharpe": 8.192816801063499,
+            "win_rate": 0.6101973684210527,
+            "trades": 1216
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.865630847554824,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5766543362104398,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 2433,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3642956969186286,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v9",
+      "name": "price_46_54",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.46,
+        "yes_price_max": 0.54,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 6.69,
+        "win_rate": 0.57,
+        "profit_factor": 1.33,
+        "total_trades": 2893,
+        "total_pnl": 4058.63,
+        "max_drawdown_pct": 8.64
+      },
+      "historical_wr": {
+        "win_rate": 0.5699965433805738,
+        "total": 2893,
+        "wins": 1649,
+        "losses": 1244
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 6.131243367215918,
+            "win_rate": 0.578838174273859,
+            "trades": 1446
+          },
+          "second_half": {
+            "sharpe": 8.578823937461916,
+            "win_rate": 0.5611610228058052,
+            "trades": 1447
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 2.282377837908555,
+            "win_rate": 0.5293711126468555,
+            "trades": 1447
+          },
+          "low_volume": {
+            "sharpe": 8.22415299916697,
+            "win_rate": 0.6106500691562933,
+            "trades": 1446
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.694978267295142,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5699965433805738,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 2893,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.326256730878977,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v10",
+      "name": "price_45_55",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 7.46,
+        "win_rate": 0.5724,
+        "profit_factor": 1.34,
+        "total_trades": 3361,
+        "total_pnl": 4887.06,
+        "max_drawdown_pct": 5.8
+      },
+      "historical_wr": {
+        "win_rate": 0.572448675989289,
+        "total": 3361,
+        "wins": 1924,
+        "losses": 1437
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 6.749368180203557,
+            "win_rate": 0.5803571428571429,
+            "trades": 1680
+          },
+          "second_half": {
+            "sharpe": 10.016930854252765,
+            "win_rate": 0.5645449137418204,
+            "trades": 1681
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 2.9004262618114964,
+            "win_rate": 0.5342058298631767,
+            "trades": 1681
+          },
+          "low_volume": {
+            "sharpe": 8.506525022279734,
+            "win_rate": 0.6107142857142858,
+            "trades": 1680
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 7.460336552057961,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.572448675989289,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 3361,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3400880304399563,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v11",
+      "name": "price_43_57",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.43,
+        "yes_price_max": 0.57,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 7.23,
+        "win_rate": 0.5653,
+        "profit_factor": 1.31,
+        "total_trades": 4235,
+        "total_pnl": 5716.74,
+        "max_drawdown_pct": 7.48
+      },
+      "historical_wr": {
+        "win_rate": 0.5652892561983471,
+        "total": 4235,
+        "wins": 2394,
+        "losses": 1841
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 6.80432704154389,
+            "win_rate": 0.5748700991969768,
+            "trades": 2117
+          },
+          "second_half": {
+            "sharpe": 8.934437736819131,
+            "win_rate": 0.5557129367327668,
+            "trades": 2118
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 2.338621440202171,
+            "win_rate": 0.5240793201133145,
+            "trades": 2118
+          },
+          "low_volume": {
+            "sharpe": 8.649326889523326,
+            "win_rate": 0.6065186584789797,
+            "trades": 2117
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 7.228318299839657,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5652892561983471,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 4235,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3105236956745876,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v12",
+      "name": "price_40_60",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.4,
+        "yes_price_max": 0.6,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 7.85,
+        "win_rate": 0.5649,
+        "profit_factor": 1.32,
+        "total_trades": 5415,
+        "total_pnl": 7445.85,
+        "max_drawdown_pct": 7.0
+      },
+      "historical_wr": {
+        "win_rate": 0.5649122807017544,
+        "total": 5415,
+        "wins": 3059,
+        "losses": 2356
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 7.190608953208964,
+            "win_rate": 0.5707425193941633,
+            "trades": 2707
+          },
+          "second_half": {
+            "sharpe": 9.960362045304635,
+            "win_rate": 0.5590841949778435,
+            "trades": 2708
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 3.43878096765013,
+            "win_rate": 0.5299113737075333,
+            "trades": 2708
+          },
+          "low_volume": {
+            "sharpe": 8.53505474566536,
+            "win_rate": 0.5999261174732176,
+            "trades": 2707
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 7.845483499325563,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5649122807017544,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 5415,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3160377099583933,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v13",
+      "name": "category_crypto",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000,
+        "category": "Crypto"
+      },
+      "metrics": {
+        "sharpe": 3.98,
+        "win_rate": 0.5823,
+        "profit_factor": 1.41,
+        "total_trades": 395,
+        "total_pnl": 668.31,
+        "max_drawdown_pct": 14.24
+      },
+      "historical_wr": {
+        "win_rate": 0.5822784810126582,
+        "total": 395,
+        "wins": 230,
+        "losses": 165
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 2.217351567162454,
+            "win_rate": 0.5431472081218274,
+            "trades": 197
+          },
+          "second_half": {
+            "sharpe": 7.031857809926591,
+            "win_rate": 0.6212121212121212,
+            "trades": 198
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 1.9994130574777216,
+            "win_rate": 0.5404040404040404,
+            "trades": 198
+          },
+          "low_volume": {
+            "sharpe": 6.357590450611482,
+            "win_rate": 0.6243654822335025,
+            "trades": 197
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 3.982902086359347,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5822784810126582,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 395,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.405036232080647,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v14",
+      "name": "category_sports",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000,
+        "category": "Sports"
+      },
+      "metrics": {
+        "sharpe": 6.38,
+        "win_rate": 0.5753,
+        "profit_factor": 1.36,
+        "total_trades": 1820,
+        "total_pnl": 2757.36,
+        "max_drawdown_pct": 9.94
+      },
+      "historical_wr": {
+        "win_rate": 0.5752747252747252,
+        "total": 1820,
+        "wins": 1047,
+        "losses": 773
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 5.3189815046805995,
+            "win_rate": 0.5835164835164836,
+            "trades": 910
+          },
+          "second_half": {
+            "sharpe": 12.95679991746676,
+            "win_rate": 0.567032967032967,
+            "trades": 910
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 3.218119514737933,
+            "win_rate": 0.5428571428571428,
+            "trades": 910
+          },
+          "low_volume": {
+            "sharpe": 8.171832182548645,
+            "win_rate": 0.6076923076923076,
+            "trades": 910
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 6.384247709123925,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5752747252747252,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 1820,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3567090604491083,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v15",
+      "name": "category_politics",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000,
+        "category": "Politics"
+      },
+      "metrics": {
+        "sharpe": null,
+        "win_rate": null,
+        "profit_factor": null,
+        "total_trades": 0,
+        "total_pnl": 0,
+        "max_drawdown_pct": 0
+      },
+      "historical_wr": {
+        "win_rate": null,
+        "total": 0,
+        "wins": 0,
+        "losses": 0
+      },
+      "robustness": null,
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": null,
+          "pass": false
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": null,
+          "pass": false
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 0,
+          "pass": false
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": null,
+          "pass": false
+        }
+      },
+      "status": "INSUFFICIENT_DATA"
+    },
+    {
+      "id": "v16",
+      "name": "volume_100",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 100
+      },
+      "metrics": {
+        "sharpe": 5.76,
+        "win_rate": 0.6118,
+        "profit_factor": 1.58,
+        "total_trades": 5126,
+        "total_pnl": 11488.25,
+        "max_drawdown_pct": 5.69
+      },
+      "historical_wr": {
+        "win_rate": 0.611783066718689,
+        "total": 5126,
+        "wins": 3136,
+        "losses": 1990
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 5.82673976998205,
+            "win_rate": 0.6699180647678502,
+            "trades": 2563
+          },
+          "second_half": {
+            "sharpe": 9.114122918434042,
+            "win_rate": 0.5536480686695279,
+            "trades": 2563
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 5.870627743706429,
+            "win_rate": 0.5567694108466641,
+            "trades": 2563
+          },
+          "low_volume": {
+            "sharpe": 5.437789631332088,
+            "win_rate": 0.666796722590714,
+            "trades": 2563
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 5.757184380008524,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.611783066718689,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 5126,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.5772991360313353,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v17",
+      "name": "volume_500",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 500
+      },
+      "metrics": {
+        "sharpe": 5.28,
+        "win_rate": 0.6158,
+        "profit_factor": 1.6,
+        "total_trades": 4375,
+        "total_pnl": 10169.77,
+        "max_drawdown_pct": 5.41
+      },
+      "historical_wr": {
+        "win_rate": 0.6157714285714285,
+        "total": 4375,
+        "wins": 2694,
+        "losses": 1681
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 4.847998669845279,
+            "win_rate": 0.6392318244170097,
+            "trades": 2187
+          },
+          "second_half": {
+            "sharpe": 12.012602425999905,
+            "win_rate": 0.5923217550274223,
+            "trades": 2188
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 4.341818687666528,
+            "win_rate": 0.5438756855575868,
+            "trades": 2188
+          },
+          "low_volume": {
+            "sharpe": 5.381768056167632,
+            "win_rate": 0.6877000457247371,
+            "trades": 2187
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 5.28131811461742,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.6157714285714285,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 4375,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.6049833739275847,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v18",
+      "name": "volume_2000",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 2000
+      },
+      "metrics": {
+        "sharpe": 7.42,
+        "win_rate": 0.5724,
+        "profit_factor": 1.34,
+        "total_trades": 3361,
+        "total_pnl": 4874.01,
+        "max_drawdown_pct": 5.85
+      },
+      "historical_wr": {
+        "win_rate": 0.572448675989289,
+        "total": 3361,
+        "wins": 1924,
+        "losses": 1437
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 6.691158523711221,
+            "win_rate": 0.5803571428571429,
+            "trades": 1680
+          },
+          "second_half": {
+            "sharpe": 10.0275151534969,
+            "win_rate": 0.5645449137418204,
+            "trades": 1681
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 2.8454540396187125,
+            "win_rate": 0.5342058298631767,
+            "trades": 1681
+          },
+          "low_volume": {
+            "sharpe": 8.483388866880047,
+            "win_rate": 0.6107142857142858,
+            "trades": 1680
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 7.42343766018601,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.572448675989289,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 3361,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.3391795677120026,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v19",
+      "name": "volume_5000",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 5000
+      },
+      "metrics": {
+        "sharpe": 5.77,
+        "win_rate": 0.5572,
+        "profit_factor": 1.26,
+        "total_trades": 2559,
+        "total_pnl": 2919.57,
+        "max_drawdown_pct": 12.05
+      },
+      "historical_wr": {
+        "win_rate": 0.5572489253614693,
+        "total": 2559,
+        "wins": 1426,
+        "losses": 1133
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 5.135077154727646,
+            "win_rate": 0.5590304925723222,
+            "trades": 1279
+          },
+          "second_half": {
+            "sharpe": 7.757716980100444,
+            "win_rate": 0.55546875,
+            "trades": 1280
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 1.2998017734842071,
+            "win_rate": 0.51328125,
+            "trades": 1280
+          },
+          "low_volume": {
+            "sharpe": 7.97378177062871,
+            "win_rate": 0.6012509773260359,
+            "trades": 1279
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 5.772555548887503,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5572489253614693,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 2559,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.257685302263398,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "v20",
+      "name": "volume_10000",
+      "params": {
+        "min_hours": 24,
+        "max_hours": 72,
+        "yes_price_min": 0.45,
+        "yes_price_max": 0.55,
+        "min_volume": 10000
+      },
+      "metrics": {
+        "sharpe": 3.65,
+        "win_rate": 0.5411,
+        "profit_factor": 1.18,
+        "total_trades": 2007,
+        "total_pnl": 1694.58,
+        "max_drawdown_pct": 22.02
+      },
+      "historical_wr": {
+        "win_rate": 0.5411061285500748,
+        "total": 2007,
+        "wins": 1086,
+        "losses": 921
+      },
+      "robustness": {
+        "time_split": {
+          "passed": true,
+          "first_half": {
+            "sharpe": 2.5653506161851305,
+            "win_rate": 0.5304087736789631,
+            "trades": 1003
+          },
+          "second_half": {
+            "sharpe": 6.806981278503084,
+            "win_rate": 0.5517928286852589,
+            "trades": 1004
+          }
+        },
+        "liquidity_split": {
+          "passed": true,
+          "high_volume": {
+            "sharpe": 0.6832613810217251,
+            "win_rate": 0.5049800796812749,
+            "trades": 1004
+          },
+          "low_volume": {
+            "sharpe": 5.482107394263932,
+            "win_rate": 0.5772681954137587,
+            "trades": 1003
+          }
+        }
+      },
+      "kill_criteria": {
+        "sharpe": {
+          "threshold": 0.5,
+          "actual": 3.645592238155828,
+          "pass": true
+        },
+        "win_rate": {
+          "threshold": 0.52,
+          "actual": 0.5411061285500748,
+          "pass": true
+        },
+        "trades": {
+          "threshold": 30,
+          "actual": 2007,
+          "pass": true
+        },
+        "profit_factor": {
+          "threshold": 1.15,
+          "actual": 1.183992987984103,
+          "pass": true
+        },
+        "time_split": {
+          "pass": true
+        }
+      },
+      "status": "PASS"
+    }
+  ],
+  "summary": {
+    "total_variants": 20,
+    "passed": 19,
+    "failed": 0,
+    "insufficient_data": 1,
+    "pass_rate": 0.95
+  },
+  "data_range": {
+    "start": "2025-01-01T01:00:00+00:00",
+    "end": "2025-12-31T00:00:00+00:00",
+    "resolved_markets": 169810
+  },
+  "best_variant": "v3",
+  "best_variant_reason": "Highest Sharpe (8.57), WR: 57.8%, Trades: 4630"
+}

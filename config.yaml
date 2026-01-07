@@ -1,0 +1,49 @@
+# Polymarket Executor Configuration
+# All settings can also be modified via the React dashboard.
+
+# Trading mode: paper (simulated) or live (real money)
+# SAFETY: Set to paper until ready for live trading
+mode: paper
+
+# General settings
+settings:
+  scan_interval_seconds: 30
+  log_level: INFO
+
+# Risk management limits
+risk:
+  max_position_usd: 100          # Max $100 per position (Kelly cap)
+  max_total_exposure_usd: 100000 # Effectively disabled
+  max_positions_per_strategy: 30 # Cap per strategy (live limit)
+  max_positions: 30              # Global cap for live trading
+  max_drawdown_pct: 1.0          # Disabled (100% = no limit)
+
+# Default order execution settings
+execution:
+  default_order_type: market       # market | limit | spread (market = most conservative)
+  limit_offset_bps: 50             # Place 0.5% better than mid (for limit orders)
+  spread_timeout_seconds: 30       # For spread mode: wait then cross
+
+# Default position sizing
+sizing:
+  method: percent                  # fixed | kelly | volatility_scaled | percent
+  fixed_amount_usd: 1              # Minimum bet size ($1 floor)
+  kelly_fraction: 0.15             # 15% Kelly fraction
+  percent_of_wallet: 0.01          # 1% of wallet balance per trade
+  max_size_usd: 100                # Cap per trade
+
+# Global market filters
+filters:
+  min_liquidity_usd: 0
+  excluded_keywords:
+    - celebrity
+    - influencer
+
+# NOTE: Strategies are now defined as Python files in strategies/
+# and enabled via deployed_strategies.yaml.
+#
+# See: python -m cli.deploy --help
+#
+# Legacy strategies config below is kept for backwards compatibility
+# but will be ignored if deployed_strategies.yaml exists.
+strategies: {}

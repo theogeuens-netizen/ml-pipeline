@@ -1,0 +1,64 @@
+experiment_id: exp-001
+created_at: "2024-12-22T08:45:00Z"
+
+backtest:
+  initial_capital: 1000
+  stake_mode: fixed
+  stake_per_bet: 10
+  cost_per_bet: 0.0
+  max_position_pct: 0.25
+
+filters:
+  categories: all
+  min_volume_24h: 500
+  min_liquidity: 1000
+  hours_to_expiry:
+    min: 1
+    max: 4  # Best entry window: 1-4h before close (Sharpe 5.09)
+  # Alternative: 24-48h before close also works well (Sharpe 5.60)
+
+strategy:
+  type: no_bias
+  side: NO
+  description: "Bet NO when YES price is in uncertain zone (40-60%)"
+
+variants:
+  # 3x3 grid on price bounds
+  - id: v1
+    yes_price_min: 0.35
+    yes_price_max: 0.55
+  - id: v2
+    yes_price_min: 0.35
+    yes_price_max: 0.60
+  - id: v3
+    yes_price_min: 0.35
+    yes_price_max: 0.65
+  - id: v4
+    yes_price_min: 0.40
+    yes_price_max: 0.55
+  - id: v5
+    yes_price_min: 0.40
+    yes_price_max: 0.60
+  - id: v6
+    yes_price_min: 0.40
+    yes_price_max: 0.65
+  - id: v7
+    yes_price_min: 0.45
+    yes_price_max: 0.55
+  - id: v8
+    yes_price_min: 0.45
+    yes_price_max: 0.60
+  - id: v9
+    yes_price_min: 0.45
+    yes_price_max: 0.65
+
+robustness:
+  time_split: true
+  category_split: false  # would need category data
+  liquidity_split: true
+
+kill_criteria:
+  sharpe: 0.5
+  win_rate: 0.51
+  min_trades: 50
+  profit_factor: 1.1

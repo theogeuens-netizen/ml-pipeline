@@ -1,0 +1,476 @@
+# Strategy Configuration
+# 8 NO Bias strategies based on exp-002 findings
+# Bet NO when in uncertain zone, using after-spread edge for Kelly sizing
+
+defaults:
+  size_pct: 0.01
+  order_type: market
+  allocated_usd: 400
+  min_volume: 0                    # No volume filter
+  min_edge_after_spread: 0.03      # 3% minimum edge after spread
+
+# =============================================================================
+# UNCERTAIN ZONE STRATEGIES
+# Exploit behavioral bias: YES outcomes are systematically overpriced
+# =============================================================================
+uncertain_zone:
+  # =========================================================================
+  # GROUP A: Tight Bucket (YES 0.48-0.52) - Pure 50/50 zone
+  # =========================================================================
+  - name: no_bias_tight_12h
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 12
+    max_hours: 14
+    expected_no_rate: 0.55         # 55% expected NO win rate
+
+  - name: no_bias_tight_24h
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 24
+    max_hours: 26
+    expected_no_rate: 0.57         # 57% expected NO win rate
+
+  - name: no_bias_tight_36h
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 36
+    max_hours: 38
+    expected_no_rate: 0.58         # 58% expected NO win rate
+
+  # Short-window variants (2-4h) with same parameters to test pre-close performance
+  - name: no_bias_tight_2h
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+
+  - name: no_bias_tight_2h_spread2
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    max_spread: 0.02
+
+  # Category exclusion variants - test if specific categories drive edge
+  - name: no_bias_tight_2h_no_crypto
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    excluded_categories:
+      - CRYPTO
+
+  - name: no_bias_tight_2h_no_sports
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    excluded_categories:
+      - SPORTS
+
+  - name: no_bias_tight_2h_no_crypto_sports
+    live: false  # PAUSED - investigating 10% fees
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    excluded_categories:
+      - CRYPTO
+      - SPORTS
+
+  # =========================================================================
+  # P0 OPTIMIZATION: Filtered variant excluding underperforming segments
+  # Based on live performance analysis (Jan 2026):
+  # - WEATHER: 0% WR, -$17.65 P&L (4 trades)
+  # - OTHER: 0% WR, -$8.00 P&L (2 trades)
+  # - MAP_WINNER (L3): 46.2% WR, -$15.47 P&L (26 trades) - opposite of series edge
+  # Expected improvement: +$28.47 P&L (+16%)
+  # =========================================================================
+  - name: no_bias_tight_2h_filtered
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    excluded_categories:
+      - CRYPTO
+      - SPORTS
+      - WEATHER      # 0% WR, -$17.65
+      - OTHER        # 0% WR, -$8.00
+    excluded_l3_categories:
+      - MAP_WINNER   # 46.2% WR, -$15.47 (individual map bets have reverse bias)
+    # Analysis: analysis-001 (Jan 2026)
+
+  # =========================================================================
+  # P0 OPTIMIZATION V2: Full optimization based on analysis-002 (Jan 5, 2026)
+  # Combines all proven filters:
+  # - YES > 0.50 only (NO < 0.50): Edge only exists when YES slightly favored
+  # - Exclude CRYPTO/SPORTS/WEATHER/OTHER: Zero or negative edge categories
+  # - Exclude MAP_WINNER L3: Reverse bias on individual map bets
+  # Backtest: 72.1% WR, $1.62/trade (vs $0.82 baseline = +96% improvement)
+  # 2% sizing to offset ~40% fewer trades (122 vs 211)
+  # =========================================================================
+  - name: no_bias_tight_2h_filtered_v2
+    yes_price_min: 0.50            # CHANGED: Only trade when YES >= 0.50 (NO <= 0.50)
+    yes_price_max: 0.52
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.55
+    size_pct: 0.02                 # 2% per trade (2x default, fewer opportunities)
+    excluded_categories:
+      - CRYPTO       # 45.9% WR, -$143 P&L - NO bias is REVERSED in crypto
+      - SPORTS       # 54.1% WR, marginal - exclude for cleaner signal
+      - WEATHER      # 0% WR, pure drain
+      - OTHER        # 0% WR, pure drain
+    excluded_l3_categories:
+      - MAP_WINNER   # 44-46% WR, reverse bias on individual maps vs series
+    # Analysis: analysis-002 (Jan 5, 2026)
+    # Expected: 72%+ WR, $1.62/trade, ~12 trades/day
+
+  # =========================================================================
+  # ESPORTS SPECIALIST: Concentrated bet on strongest edge segment
+  # Backtest (Jan 5, 2026): 322 trades, 73.3% WR, +$0.237 edge per dollar
+  # Key insight: Edge is in 0.48-0.50 zone, NOT 0.50-0.52 (which loses money)
+  #              MAP_WINNER variants: 44-46% WR (reverse bias) - exclude
+  # 3% sizing for high-conviction, concentrated exposure
+  # =========================================================================
+  - name: no_bias_esports_2h
+    yes_price_min: 0.48            # Backtest: 73% WR in 0.48-0.50
+    yes_price_max: 0.50            # NOT 0.50-0.52 (42% WR, loses money)
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.73         # 73% from historical backtest (322 trades)
+    size_pct: 0.03                 # 3% per trade (high conviction)
+    categories:
+      - ESPORTS                    # Only trade ESPORTS
+    excluded_l3_categories:
+      - MAP_WINNER                 # 44-46% WR, reverse bias on individual maps
+    # Backtest: Jan 5, 2026 - 47.8M snapshots, 24.8K resolved markets
+    # ESPORTS 0.48-0.50: 322 trades, 73.3% WR, +$0.237/dollar
+    # ESPORTS 0.50-0.52: 187 trades, 42.2% WR, -$0.085/dollar (LOSING)
+    # Strong L2s: CSGO, HONOR_OF_KINGS, DOTA2, LOL
+
+  # =========================================================================
+  # YES BIAS CRYPTO: Exploit reverse bias in crypto direction markets
+  # Analysis-002 (Jan 5, 2026):
+  # - CRYPTO shows REVERSED bias: YES wins 54.1% vs 45.9% for NO
+  # - Hypothetical YES P&L: +$120.59 vs actual NO P&L: -$143.08
+  # - Edge strongest when YES is underdog (0.48-0.49): 53% WR, $0.22/trade
+  # - Higher edge in 0.49-0.50: 61.4% WR, $0.59/trade
+  # Cause: Crypto traders bet against trend (mean reversion bias), but momentum wins
+  # =========================================================================
+  - name: yes_bias_crypto_2h
+    side: "YES"                    # BET YES (not NO)
+    yes_price_min: 0.48            # YES underdog zone
+    yes_price_max: 0.50            # Up to 50%
+    min_hours: 2
+    max_hours: 4
+    expected_yes_rate: 0.55        # 55% YES win rate (observed 54-61%)
+    size_pct: 0.02                 # 2% per trade
+    categories:
+      - CRYPTO                     # Only CRYPTO (this is where YES bias exists)
+    # Analysis: analysis-002 (Jan 5, 2026)
+    # Based on: 455 CRYPTO trades in no_bias_tight_2h showing reverse bias
+    # Strong L2s: XRP (56.1% YES WR), ETHEREUM (55.4%), BITCOIN (54.7%)
+    # Expected: 55%+ YES WR, ~$0.30-0.50/trade, high volume
+
+  # =========================================================================
+  # CRYPTO LONGSHOT NO: Exploit longshot bias in crypto markets
+  # YES 20-35% (NO 65-80%) resolves NO 77% of the time
+  # Retail overvalues unlikely YES outcomes (moon shots)
+  # Backtest: 77% WR, +$0.44/trade, Sharpe 2.5+
+  # =========================================================================
+  - name: crypto_longshot_no
+    side: "NO"
+    yes_price_min: 0.20              # YES underdog (20-35%)
+    yes_price_max: 0.35              # → NO is 65-80%
+    min_hours: 1
+    max_hours: 24
+    expected_no_rate: 0.77           # 77% expected NO win rate
+    min_edge_after_spread: 0.05      # 5% minimum edge after spread
+    max_spread: 0.03                 # 3c max spread for execution quality
+    min_volume: 5000                 # $5K min 24h volume (liquidity proxy)
+    size_pct: 0.02                   # 2% of bankroll per trade
+    categories:
+      - CRYPTO                       # Only CRYPTO markets
+
+  # =========================================================================
+  # GROUP B: Underdog NO (YES 0.55-0.70, so NO is 0.30-0.45)
+  # Buy cheap NO tokens expecting them to win more than priced
+  # =========================================================================
+  - name: no_bias_underdog_12h
+    yes_price_min: 0.55
+    yes_price_max: 0.70
+    min_hours: 12
+    max_hours: 14
+    expected_no_rate: 0.50         # NO priced at 30-45%, expect 50%
+
+  - name: no_bias_underdog_12h_alt
+    yes_price_min: 0.55
+    yes_price_max: 0.70
+    min_hours: 12
+    max_hours: 14
+    expected_no_rate: 0.52         # Slightly higher expectation variant
+
+  - name: no_bias_underdog_24h
+    yes_price_min: 0.55
+    yes_price_max: 0.70
+    min_hours: 24
+    max_hours: 26
+    expected_no_rate: 0.52         # Slightly higher edge at 24h
+
+  - name: no_bias_underdog_36h
+    yes_price_min: 0.55
+    yes_price_max: 0.70
+    min_hours: 36
+    max_hours: 38
+    expected_no_rate: 0.54         # Best edge at 36h
+
+  # Short-window underdog variants (2-4h)
+  - name: no_bias_underdog_2h
+    yes_price_min: 0.55
+    yes_price_max: 0.70
+    min_hours: 2
+    max_hours: 4
+    expected_no_rate: 0.50
+
+  # =========================================================================
+  # GROUP C: Spread Filter Variants (Tight 12-14h with max spread)
+  # Test impact of spread filtering on performance
+  # =========================================================================
+  - name: no_bias_tight_12h_spread4
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 12
+    max_hours: 14
+    expected_no_rate: 0.55
+    max_spread: 0.04               # Only trade if spread <= 4%
+
+  # =========================================================================
+  # P1 OPTIMIZATION: Hourly-only variant for crypto direction
+  # Based on live performance analysis (Jan 2026):
+  # - DIRECTION_HOURLY: $0.33/trade avg, 55.6% WR, 126 trades
+  # - DIRECTION_15MIN:  $0.18/trade avg, 53.8% WR, 292 trades
+  # Hourly has 1.8x better edge per trade than 15-min
+  # Expected Sharpe improvement: +80% per trade (accepts lower volume)
+  # =========================================================================
+  - name: no_bias_tight_12h_hourly
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 12
+    max_hours: 14
+    expected_no_rate: 0.55
+    max_spread: 0.04
+    l3_categories:
+      - DIRECTION_HOURLY   # 1.8x edge vs 15-min; accepts ~30% of crypto volume
+    # Analysis: analysis-001 (Jan 2026)
+
+  - name: no_bias_tight_12h_spread2
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 12
+    max_hours: 14
+    expected_no_rate: 0.55
+    max_spread: 0.02               # Only trade if spread <= 2%
+
+  - name: no_bias_tight_12h_spread2_alt
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 12
+    max_hours: 14
+    expected_no_rate: 0.54
+    max_spread: 0.02               # Same spread filter, slight expectation tweak
+
+  - name: no_bias_tight_12h_liquid
+    yes_price_min: 0.48
+    yes_price_max: 0.52
+    min_hours: 12
+    max_hours: 14
+    expected_no_rate: 0.55
+    min_volume: 500                # Require at least $500 24h volume for entries
+
+  # =========================================================================
+  # FAVORITE ZONE STRATEGIES (exp-004)
+  # Exploit behavioral bias: YES favorites (0.70-0.95) are overpriced
+  # Backtest: 72.9% WR, Sharpe 19.1, 25K trades
+  # Deployed: 2024-12-25
+  # =========================================================================
+
+  # 24-96h window variants
+  - name: favorite_no_24_96h_v100
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 24
+    max_hours: 96
+    expected_no_rate: 0.70         # From exp-004 backtest (72.9% actual)
+    min_volume: 100
+    # Experiment: exp-004:v4+v6+v8
+
+  - name: favorite_no_24_96h_v100_no_crypto_sports
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 24
+    max_hours: 96
+    expected_no_rate: 0.70
+    min_volume: 100
+    excluded_categories:
+      - CRYPTO
+      - SPORTS
+
+  - name: favorite_no_24_96h_v500
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 24
+    max_hours: 96
+    expected_no_rate: 0.70
+    min_volume: 500
+    # Experiment: exp-004:v4+v6+v9
+
+  # 48-168h window variants
+  - name: favorite_no_48_168h_v100
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 48
+    max_hours: 168
+    expected_no_rate: 0.70
+    min_volume: 100
+    # Experiment: exp-004:v4+v7+v8
+
+  - name: favorite_no_48_168h_v500
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 48
+    max_hours: 168
+    expected_no_rate: 0.70
+    min_volume: 500
+    # Experiment: exp-004:v4+v7+v9
+
+  # Top categories only - highest edge from exp-004 category analysis
+  # WEATHER 89%, SCIENCE 86%, ESPORTS 85%, TECH 84%, OTHER 82% WR
+  - name: favorite_no_24_96h_top_cats
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_hours: 24
+    max_hours: 96
+    expected_no_rate: 0.85         # Higher rate for top categories (avg 85% WR)
+    min_volume: 100
+    size_pct: 0.10                 # 10% per trade (higher conviction, fewer opportunities)
+    categories:
+      - WEATHER
+      - SCIENCE
+      - ESPORTS
+      - TECH
+      - OTHER
+    # Experiment: exp-004:v4+v6 with L1 category filter
+    # Expected: ~3.4K trades, 80-89% WR, Sharpe 25-33
+
+# =============================================================================
+# LONGSHOT STRATEGIES
+# Buy high-probability NO outcomes near expiry (2-72h)
+# Dynamic spread: 3% at NO=0.85, 1% at NO=0.95
+# =============================================================================
+longshot:
+  - name: longshot_no_all
+    side: "NO"
+    min_probability: 0.85
+    max_probability: 0.95
+    min_hours: 2
+    max_hours: 72
+    spread_at_min_prob: 0.03           # 3% spread tolerance at NO=0.85
+    spread_at_max_prob: 0.01           # 1% spread tolerance at NO=0.95
+    size_pct: 0.01
+
+  - name: longshot_no_ex_sports
+    side: "NO"
+    min_probability: 0.85
+    max_probability: 0.95
+    min_hours: 2
+    max_hours: 72
+    spread_at_min_prob: 0.03
+    spread_at_max_prob: 0.01
+    size_pct: 0.01
+    excluded_categories:
+      - SPORTS
+
+  - name: longshot_no_ex_crypto
+    side: "NO"
+    min_probability: 0.85
+    max_probability: 0.95
+    min_hours: 2
+    max_hours: 72
+    spread_at_min_prob: 0.03
+    spread_at_max_prob: 0.01
+    size_pct: 0.01
+    excluded_categories:
+      - CRYPTO
+
+# =============================================================================
+# BOOK IMBALANCE MOMENTUM STRATEGIES
+# Follow orderbook pressure with time/profit-based exits
+# Entry: |book_imbalance| > 0.5 in middle zone (30-70%)
+# Exit: 1 hour OR 5% profit target
+# Backtest: 80% WR on CRYPTO/ESPORTS with tight spreads
+# =============================================================================
+book_imbalance_momentum:
+  - name: book_imbalance_crypto_esports
+    min_imbalance: 0.5              # |imbalance| > 50% required
+    yes_price_min: 0.30             # Price zone 30-70%
+    yes_price_max: 0.70
+    max_spread: 0.01                # 1c max spread for execution quality
+    categories:
+      - CRYPTO                      # 86% WR on buys
+      - ESPORTS                     # 84% WR on sells
+    max_hold_hours: 1.0             # Exit after 1 hour
+    profit_target_pct: 0.05         # Or exit at 5% profit
+    cooldown_minutes: 60            # 60 min between entries same market
+    size_pct: 0.01                  # 1% per trade
+
+# =============================================================================
+# XGBOOST IMBALANCE MOMENTUM STRATEGIES
+# ML-filtered imbalance signals - only trade when model confidence >= 85%
+# Backtest: 95-99% win rate on high-confidence signals
+# Entry: XGBoost predicts price direction based on imbalance + 11 features
+# Exit: Time-based (1 hour)
+# =============================================================================
+xgb_imbalance:
+  # 80% confidence threshold - more signals, slightly lower expected WR
+  - name: xgb_imbalance_crypto_esports
+    buy_model_path: models/imbalance_buy.json
+    sell_model_path: models/imbalance_sell.json
+    min_confidence: 0.80            # Only trade when XGB confidence >= 80%
+    categories:
+      - CRYPTO
+      - ESPORTS
+    yes_price_min: 0.30             # Price zone 30-70%
+    yes_price_max: 0.70
+    min_imbalance: 0.50             # |imbalance| > 50% required
+    max_spread: 0.01                # 1c max spread
+    max_hold_hours: 1.0             # Exit after 1 hour
+    base_size_pct: 0.005            # 0.5% base, scales to 0.75% at 95%+ confidence
+    max_positions: 20               # Max concurrent positions
+    cooldown_minutes: 60            # 60 min between entries same market
+    enabled: true
+
+  # 85% confidence threshold - fewer signals, higher expected WR
+  - name: xgb_imbalance_crypto_esports_85
+    buy_model_path: models/imbalance_buy.json
+    sell_model_path: models/imbalance_sell.json
+    min_confidence: 0.85            # Only trade when XGB confidence >= 85%
+    categories:
+      - CRYPTO
+      - ESPORTS
+    yes_price_min: 0.30
+    yes_price_max: 0.70
+    min_imbalance: 0.50
+    max_spread: 0.01
+    max_hold_hours: 1.0
+    base_size_pct: 0.0075           # 0.75% base (higher conviction)
+    max_positions: 20
+    cooldown_minutes: 60
+    enabled: true

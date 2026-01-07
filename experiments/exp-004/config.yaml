@@ -1,0 +1,187 @@
+experiment_id: exp-004
+created_at: "2024-12-25T10:30:00Z"
+
+# Strategy configuration
+strategy_type: no_bias
+strategy_side: NO
+
+# Backtest settings
+backtest:
+  initial_capital: 1000
+  stake_mode: fixed
+  stake_per_bet: 10
+  cost_per_bet: 0.0
+  max_position_pct: 0.25
+
+# Deployment config (from spec.md)
+deployment:
+  allocated_usd: 400
+  order_type: market
+  size_pct: 0.01
+  min_edge_after_spread: 0.03
+  max_spread: null
+  paper_trade: true
+
+# Base filters (variants override specific values)
+filters:
+  categories: null  # all categories
+  min_volume_24h: 500  # default, varies by variant
+  min_liquidity: 1000  # default, varies by variant
+  hours_min: 12
+  hours_max: 168
+  yes_price_min: 0.55  # default, varies by variant
+  yes_price_max: 0.95  # fixed upper bound
+
+# Parameter variants to test
+variants:
+  # YES Price Threshold Variants (v1-v4)
+  - id: v1
+    name: threshold_55
+    yes_price_min: 0.55
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 168
+
+  - id: v2
+    name: threshold_60
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 168
+
+  - id: v3
+    name: threshold_65
+    yes_price_min: 0.65
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 168
+
+  - id: v4
+    name: threshold_70
+    yes_price_min: 0.70
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 168
+
+  # Time Window Variants (v5-v7) - using threshold 0.60 as baseline
+  - id: v5
+    name: time_12_48h
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 48
+
+  - id: v6
+    name: time_24_96h
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 1000
+    hours_min: 24
+    hours_max: 96
+
+  - id: v7
+    name: time_48_168h
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 1000
+    hours_min: 48
+    hours_max: 168
+
+  # Volume Threshold Variants (v8-v11) - using threshold 0.60, 12-168h
+  - id: v8
+    name: vol_100
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 100
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 168
+
+  - id: v9
+    name: vol_500
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 168
+
+  - id: v10
+    name: vol_2000
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 2000
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 168
+
+  - id: v11
+    name: vol_5000
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 5000
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 168
+
+  # Liquidity Threshold Variants (v12-v15) - using threshold 0.60, 12-168h
+  - id: v12
+    name: liq_500
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 500
+    hours_min: 12
+    hours_max: 168
+
+  - id: v13
+    name: liq_1000
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 1000
+    hours_min: 12
+    hours_max: 168
+
+  - id: v14
+    name: liq_2500
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 2500
+    hours_min: 12
+    hours_max: 168
+
+  - id: v15
+    name: liq_5000
+    yes_price_min: 0.60
+    yes_price_max: 0.95
+    min_volume_24h: 500
+    min_liquidity: 5000
+    hours_min: 12
+    hours_max: 168
+
+# Robustness checks
+robustness:
+  time_split: true
+  category_split: true
+  liquidity_split: true
+
+# Kill criteria thresholds
+kill_criteria:
+  sharpe: 0.5
+  win_rate: 0.51
+  trades: 50
+  profit_factor: 1.1
