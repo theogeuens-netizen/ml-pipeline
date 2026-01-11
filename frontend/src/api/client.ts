@@ -538,6 +538,7 @@ export interface LeaderboardStrategy {
   win_count: number
   loss_count: number
   win_rate: number
+  total_cost_basis: number
   sharpe_ratio: number | null
   sortino_ratio: number | null
   max_drawdown_usd: number

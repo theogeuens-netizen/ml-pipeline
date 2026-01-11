@@ -412,10 +412,12 @@ class PositionManager:
         now = datetime.now(timezone.utc)
 
         try:
-            # Find all open positions on this market
+            # Find all open positions on this market for this position manager's mode
+            # CRITICAL: Filter by is_paper to keep paper and live positions separate
             positions = db.query(Position).filter(
                 Position.market_id == market_id,
                 Position.status == PositionStatus.OPEN.value,
+                Position.is_paper == self.is_paper,
             ).all()
 
             if not positions:

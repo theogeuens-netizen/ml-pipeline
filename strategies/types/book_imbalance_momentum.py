@@ -33,6 +33,9 @@ class BookImbalanceMomentumStrategy(Strategy):
         cooldown_minutes: float = 60,  # 60 min between entries on same market
         size_pct: float = 0.01,
         order_type: str = "limit",
+        fixed_size_usd: float = None,  # Fixed USD size per trade (overrides size_pct)
+        max_positions: int = 10,  # Max concurrent positions for this strategy
+        min_minutes_to_close: float = 0,  # Min minutes to market close (live safety)
         **kwargs,
     ):
         self.name = name
@@ -47,6 +50,10 @@ class BookImbalanceMomentumStrategy(Strategy):
         self.cooldown_minutes = cooldown_minutes
         self.size_pct = size_pct
         self.order_type = order_type
+        self.fixed_size_usd = fixed_size_usd
+        self.max_positions = max_positions
+        self.min_minutes_to_close = min_minutes_to_close
+        self.live = kwargs.get('live', False)  # Enable live trading
 
         # Track last entry time per market for deduplication
         self._last_entry: dict[int, datetime] = {}
@@ -64,6 +71,12 @@ class BookImbalanceMomentumStrategy(Strategy):
             # Category filter
             if self.categories and m.category_l1 not in self.categories:
                 continue
+
+            # Time to close filter (live safety)
+            if self.min_minutes_to_close > 0 and m.hours_to_close is not None:
+                minutes_to_close = m.hours_to_close * 60
+                if minutes_to_close < self.min_minutes_to_close:
+                    continue
 
             # Price zone filter
             if m.price < self.yes_price_min or m.price > self.yes_price_max:
@@ -123,7 +136,7 @@ class BookImbalanceMomentumStrategy(Strategy):
                 price_at_signal=execution_price,
                 edge=abs(book_imbalance) * 0.1,  # Simple edge estimate
                 confidence=0.6,
-                size_usd=None,
+                size_usd=self.fixed_size_usd,  # Fixed size if set, else None (use size_pct)
                 best_bid=best_bid,
                 best_ask=best_ask,
                 strategy_name=self.name,
@@ -133,8 +146,13 @@ class BookImbalanceMomentumStrategy(Strategy):
                     "book_imbalance": book_imbalance,
                     "yes_price": m.price,
                     "spread": m.best_ask - m.best_bid,
+                    "hours_to_close": m.hours_to_close,
                     "max_hold_hours": self.max_hold_hours,
                     "profit_target_pct": self.profit_target_pct,
+                    "size_pct": self.size_pct,
+                    "fixed_size_usd": self.fixed_size_usd,
+                    "max_positions": self.max_positions,
+                    "min_minutes_to_close": self.min_minutes_to_close,
                 },
             )
 

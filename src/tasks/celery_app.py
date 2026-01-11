@@ -41,6 +41,8 @@ app.conf.update(
     # Worker settings
     worker_prefetch_multiplier=1,  # Don't prefetch too many tasks
     worker_concurrency=4,
+    worker_max_tasks_per_child=10000,  # Restart worker process after 10K tasks (~8 hours) to prevent memory leaks
+    worker_max_memory_per_child=2_000_000,  # Restart if worker uses > 2GB (in KB)
     # Result settings
     result_expires=3600,  # Results expire after 1 hour
 
@@ -66,6 +68,7 @@ app.conf.update(
         "src.tasks.categorization.*": {"queue": "categorization"},
         "src.tasks.news.*": {"queue": "default"},
         "src.csgo.tasks.*": {"queue": "discovery"},  # Route CSGO tasks to discovery queue
+        "src.csgo.grid.tasks.*": {"queue": "discovery"},  # Route GRID tasks to discovery queue
     },
     # Default queue
     task_default_queue="default",
@@ -92,15 +95,12 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute=5),
         "kwargs": {"limit": 1000},
     },
-    # NOTE: Claude-based tasks disabled in Celery - they require the Claude CLI
-    # which is only available on the host machine. Use scripts/cron_categorize.sh
-    # or run manually: python3 scripts/categorize_with_claude.py --batch 30
-    #
-    # "categorize-with-claude": {
-    #     "task": "src.tasks.categorization.categorize_with_claude",
-    #     "schedule": crontab(minute=15),
-    #     "kwargs": {"batch_size": 15},
-    # },
+    # Claude-based categorization - runs at :15 after rules finish at :05
+    "categorize-with-claude": {
+        "task": "src.tasks.categorization.categorize_with_claude",
+        "schedule": crontab(minute=15),
+        "kwargs": {"batch_size": 30},
+    },
     # "validate-rule-accuracy": {
     #     "task": "src.tasks.categorization.validate_rule_accuracy",
     #     "schedule": crontab(hour="*/6", minute=30),
@@ -148,6 +148,29 @@ app.conf.beat_schedule = {
     "fetch-marketaux-news": {
         "task": "src.tasks.news.fetch_marketaux_news",
         "schedule": crontab(minute="*/15"),  # Every 15 minutes
+    },
+    # === GRID ESPORTS DATA ===
+    # Match GRID series to Polymarket markets every 10 minutes
+    "match-grid-series": {
+        "task": "src.csgo.grid.tasks.match_grid_series",
+        "schedule": crontab(minute="*/10"),
+    },
+    # Poll GRID API for live match state changes every 5 seconds
+    # (respects rate limit of 20 req/min with batching)
+    "poll-grid-state": {
+        "task": "src.csgo.grid.tasks.poll_grid_state",
+        "schedule": 5.0,
+    },
+    # Fill delayed prices (30s, 1m, 5m) every 10 seconds
+    "fill-grid-prices": {
+        "task": "src.csgo.grid.tasks.fill_grid_prices",
+        "schedule": 10.0,
+    },
+    # Clean up old GRID state daily
+    "cleanup-grid-state": {
+        "task": "src.csgo.grid.tasks.cleanup_grid_state",
+        "schedule": crontab(hour=4, minute=15),  # Daily at 4:15 AM UTC
+        "kwargs": {"days_old": 7},
     },
     # === CS:GO PIPELINE ===
     # Sync CS:GO markets to csgo_matches table every 10 minutes
@@ -225,8 +248,9 @@ app.conf.beat_schedule = {
 }
 
 # Import tasks to register them with Celery
-app.autodiscover_tasks(["src.tasks", "src.csgo"])
+app.autodiscover_tasks(["src.tasks", "src.csgo", "src.csgo.grid"])
 
 # Explicitly import to ensure registration
 from src.tasks import discovery, snapshots, alerts, categorization, news  # noqa: F401, E402
 from src.csgo import tasks as csgo_tasks  # noqa: F401, E402
+from src.csgo.grid import tasks as grid_tasks  # noqa: F401, E402

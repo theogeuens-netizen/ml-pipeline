@@ -14,8 +14,8 @@ settings:
 risk:
   max_position_usd: 100          # Max $100 per position (Kelly cap)
   max_total_exposure_usd: 100000 # Effectively disabled
-  max_positions_per_strategy: 30 # Cap per strategy (live limit)
-  max_positions: 30              # Global cap for live trading
+  max_positions_per_strategy: 40 # Cap per strategy
+  max_positions: 0               # 0 = no global cap
   max_drawdown_pct: 1.0          # Disabled (100% = no limit)
 
 # Default order execution settings

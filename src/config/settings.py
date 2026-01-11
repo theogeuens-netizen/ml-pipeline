@@ -103,6 +103,8 @@ class Settings(BaseSettings):
 
     # Proxy for bypassing IP blocks (optional SOCKS5 URL)
     trading_proxy_url: str = ""
+    # Fallback proxy servers (comma-separated hostnames, uses same credentials)
+    trading_proxy_fallbacks: str = ""
 
     # Executor mode (paper or live)
     executor_mode: str = "paper"
@@ -123,6 +125,11 @@ class Settings(BaseSettings):
     # News APIs
     # ===========================================
     marketaux_api_key: str = ""  # Get from https://www.marketaux.com/
+
+    # ===========================================
+    # GRID Esports API
+    # ===========================================
+    grid_api_key: str = ""  # Get from https://grid.gg/
 
 
 @lru_cache()

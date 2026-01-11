@@ -492,12 +492,27 @@ class UnifiedCSGOEngine:
             # Get token IDs
             market = db.query(Market).filter(Market.id == market_id).first()
 
+            # Calculate spread from actual bid/ask - the DB spread field is garbage
+            best_bid = float(match.best_bid) if match.best_bid else None
+            best_ask = float(match.best_ask) if match.best_ask else None
+
+            # Compute real spread from order book prices
+            if best_bid is not None and best_ask is not None and best_bid > 0:
+                computed_spread = best_ask - best_bid
+                # Sanity check: spread should be positive and reasonable
+                if computed_spread < 0 or computed_spread > 0.50:
+                    # Something is wrong with the data - use conservative fallback
+                    computed_spread = 0.10  # Assume 10% spread when data is bad
+            else:
+                # No bid/ask data - use conservative default
+                computed_spread = 0.10
+
             return {
                 "yes_price": float(match.yes_price),
                 "no_price": float(match.no_price) if match.no_price else 1 - float(match.yes_price),
-                "spread": float(match.spread) if match.spread else None,  # Don't fake spread - let strategies handle NULL
-                "best_bid": float(match.best_bid) if match.best_bid else None,  # Actual bid from CLOB
-                "best_ask": float(match.best_ask) if match.best_ask else None,  # Actual ask from CLOB
+                "spread": computed_spread,  # Computed from bid/ask, not the garbage DB field
+                "best_bid": best_bid,
+                "best_ask": best_ask,
                 "yes_token_id": market.yes_token_id if market else None,
                 "no_token_id": market.no_token_id if market else None,
             }

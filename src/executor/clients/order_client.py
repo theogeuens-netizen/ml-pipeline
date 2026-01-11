@@ -9,7 +9,7 @@ Handles:
 - Order status tracking
 - Order cancellation
 
-Supports SOCKS5 proxy for bypassing IP blocks.
+Supports SOCKS5 proxy for bypassing IP blocks with automatic fallback.
 
 IMPORTANT: Proxy configuration is deferred to client initialization to avoid
 polluting global environment variables that affect other HTTP clients.
@@ -30,27 +30,77 @@ if TYPE_CHECKING:
 
 # Track if proxy has been configured (done once per process, lazily)
 _proxy_configured = False
+# Cache the working proxy URL
+_working_proxy_url: Optional[str] = None
+
+
+def _test_proxy(proxy_url: str, timeout: int = 8) -> bool:
+    """Test if a proxy works by making a request to Polymarket."""
+    import requests
+    try:
+        proxies = {'https': proxy_url, 'http': proxy_url}
+        r = requests.get('https://clob.polymarket.com/time', proxies=proxies, timeout=timeout)
+        return r.status_code == 200
+    except Exception:
+        return False
 
 
 def _configure_proxy_if_needed():
     """
     Configure proxy environment variables before importing py_clob_client.
 
+    Tries the primary proxy first, then fallbacks if it fails.
     This is done lazily (only when client is first created) to avoid
     polluting the environment for other HTTP clients like Gamma/CLOB fetchers.
     """
-    global _proxy_configured
+    global _proxy_configured, _working_proxy_url
 
     if _proxy_configured:
         return
 
-    if hasattr(settings, 'trading_proxy_url') and settings.trading_proxy_url:
-        os.environ["ALL_PROXY"] = settings.trading_proxy_url
-        os.environ["HTTPS_PROXY"] = settings.trading_proxy_url
-        os.environ["HTTP_PROXY"] = settings.trading_proxy_url
-        proxy_host = settings.trading_proxy_url.split('@')[-1] if '@' in settings.trading_proxy_url else settings.trading_proxy_url
-        logger.info(f"Trading proxy configured: {proxy_host}")
+    primary_proxy = getattr(settings, 'trading_proxy_url', '')
+    if not primary_proxy:
+        _proxy_configured = True
+        return
 
+    # Extract credentials from primary proxy URL for fallbacks
+    # Format: socks5h://user:pass@host:port
+    proxy_creds = None
+    if '@' in primary_proxy:
+        proto_creds = primary_proxy.split('@')[0]  # socks5h://user:pass
+        proxy_creds = proto_creds.split('://')[-1]  # user:pass
+
+    # Build list of proxies to try
+    proxies_to_try = [primary_proxy]
+
+    # Add fallbacks if configured
+    fallbacks = getattr(settings, 'trading_proxy_fallbacks', '')
+    if fallbacks and proxy_creds:
+        for fallback_host in fallbacks.split(','):
+            fallback_host = fallback_host.strip()
+            if fallback_host:
+                # Construct full proxy URL with same credentials
+                fallback_url = f"socks5h://{proxy_creds}@{fallback_host}:1080"
+                proxies_to_try.append(fallback_url)
+
+    # Try each proxy until one works
+    for proxy_url in proxies_to_try:
+        proxy_host = proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url
+        logger.info(f"Testing proxy: {proxy_host}")
+
+        if _test_proxy(proxy_url):
+            logger.info(f"Proxy working: {proxy_host}")
+            _working_proxy_url = proxy_url
+            os.environ["ALL_PROXY"] = proxy_url
+            os.environ["HTTPS_PROXY"] = proxy_url
+            os.environ["HTTP_PROXY"] = proxy_url
+            _proxy_configured = True
+            return
+        else:
+            logger.warning(f"Proxy failed: {proxy_host}")
+
+    # All proxies failed - log error but continue (might work without proxy)
+    logger.error(f"All {len(proxies_to_try)} proxies failed! Continuing without proxy.")
     _proxy_configured = True
 
 

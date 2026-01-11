@@ -17,6 +17,7 @@ class NoBiasStrategy(Strategy):
         min_liquidity: float = 0,
         size_pct: float = 0.01,
         order_type: str = "spread",
+        max_positions: int = None,
         **kwargs,
     ):
         self.name = name
@@ -28,6 +29,7 @@ class NoBiasStrategy(Strategy):
         self.min_liquidity = min_liquidity
         self.size_pct = size_pct
         self.order_type = order_type
+        self.max_positions = max_positions
         super().__init__()
 
     def scan(self, markets: list[MarketData]) -> Iterator[Signal]:

@@ -11,11 +11,26 @@ type SortDirection = 'asc' | 'desc'
 
 const PAGE_SIZE = 20
 
+type ModeFilter = 'all' | 'paper' | 'live'
+
 export default function PositionsTable() {
   const [activeTab, setActiveTab] = useState<Tab>('open')
   const [currentPage, setCurrentPage] = useState(0)
-  const { data: openPositionsData, isLoading: openLoading } = usePositions({ status: 'open', limit: 100 })
-  const { data: closedPositionsData, isLoading: closedLoading } = usePositions({ status: 'closed', limit: 100 })
+  const [modeFilter, _setModeFilter] = useState<ModeFilter>('all')
+
+  // Determine is_paper param based on mode filter
+  const isPaperParam = modeFilter === 'all' ? undefined : modeFilter === 'paper'
+
+  const { data: openPositionsData, isLoading: openLoading } = usePositions({
+    status: 'open',
+    limit: 500,
+    is_paper: isPaperParam
+  })
+  const { data: closedPositionsData, isLoading: closedLoading } = usePositions({
+    status: 'closed',
+    limit: 500,
+    is_paper: isPaperParam
+  })
 
   const positionsData = activeTab === 'open' ? openPositionsData : closedPositionsData
   const isLoading = activeTab === 'open' ? openLoading : closedLoading
@@ -280,12 +295,22 @@ export default function PositionsTable() {
                   return (
                     <tr
                       key={pos.id}
-                      className="border-b border-gray-700/50 hover:bg-gray-700/30 transition-colors"
+                      className={clsx(
+                        "border-b border-gray-700/50 hover:bg-gray-700/30 transition-colors",
+                        !pos.is_paper && "bg-green-900/10"
+                      )}
                     >
                       <td className="py-3 px-3">
-                        <span className="text-gray-300 font-mono text-xs">
-                          {pos.strategy_name}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {!pos.is_paper && (
+                            <span className="px-1.5 py-0.5 bg-green-600/30 text-green-400 text-[10px] font-bold rounded">
+                              LIVE
+                            </span>
+                          )}
+                          <span className="text-gray-300 font-mono text-xs">
+                            {pos.strategy_name}
+                          </span>
+                        </div>
                       </td>
                       <td className="py-3 px-3">
                         <span
@@ -463,12 +488,22 @@ export default function PositionsTable() {
                   return (
                     <tr
                       key={pos.id}
-                      className="border-b border-gray-700/50 hover:bg-gray-700/30 transition-colors"
+                      className={clsx(
+                        "border-b border-gray-700/50 hover:bg-gray-700/30 transition-colors",
+                        !pos.is_paper && "bg-green-900/10"
+                      )}
                     >
                       <td className="py-3 px-3">
-                        <span className="text-gray-300 font-mono text-xs">
-                          {pos.strategy_name}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {!pos.is_paper && (
+                            <span className="px-1.5 py-0.5 bg-green-600/30 text-green-400 text-[10px] font-bold rounded">
+                              LIVE
+                            </span>
+                          )}
+                          <span className="text-gray-300 font-mono text-xs">
+                            {pos.strategy_name}
+                          </span>
+                        </div>
                       </td>
                       <td className="py-3 px-3">
                         <span

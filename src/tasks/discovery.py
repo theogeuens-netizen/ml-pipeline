@@ -573,10 +573,16 @@ def check_resolutions() -> dict:
     from decimal import Decimal
 
     now = datetime.now(timezone.utc)
-    position_manager = PositionManager(is_paper=True)
+    # CRITICAL: Create both paper AND live position managers
+    # Both need to process resolutions separately
+    paper_position_manager = PositionManager(is_paper=True)
+    live_position_manager = PositionManager(is_paper=False)
+
     resolved_count = 0
-    positions_closed = 0
-    total_pnl = 0.0
+    paper_positions_closed = 0
+    live_positions_closed = 0
+    paper_pnl = 0.0
+    live_pnl = 0.0
 
     with get_session() as session:
         # Get market IDs with open positions
@@ -592,18 +598,28 @@ def check_resolutions() -> dict:
         markets_with_outcomes = session.execute(
             select(Market).where(
                 Market.id.in_(markets_with_positions_set),
-                Market.outcome.in_(["YES", "NO", "INVALID"]),  # Outcome already captured
+                Market.outcome.in_(["YES", "NO", "INVALID", "UNKNOWN"]),  # Outcome already captured (UNKNOWN = voided/cancelled)
             )
         ).scalars().all()
 
         for market in markets_with_outcomes:
             outcome = market.outcome
-            result = _close_positions_for_market(
-                session, market, outcome, position_manager
+
+            # Close PAPER positions
+            paper_result = _close_positions_for_market(
+                session, market, outcome, paper_position_manager, is_paper=True
             )
+            paper_positions_closed += paper_result["positions_closed"]
+            paper_pnl += paper_result["total_pnl"]
+
+            # Close LIVE positions
+            live_result = _close_positions_for_market(
+                session, market, outcome, live_position_manager, is_paper=False
+            )
+            live_positions_closed += live_result["positions_closed"]
+            live_pnl += live_result["total_pnl"]
+
             resolved_count += 1
-            positions_closed += result["positions_closed"]
-            total_pnl += result["total_pnl"]
 
         session.commit()
 
@@ -657,12 +673,21 @@ def check_resolutions() -> dict:
                             # Refresh market in session for position closure
                             session.flush()
 
-                            result = _close_positions_for_market(
-                                session, market, outcome, position_manager
+                            # Close PAPER positions
+                            paper_result = _close_positions_for_market(
+                                session, market, outcome, paper_position_manager, is_paper=True
                             )
+                            paper_positions_closed += paper_result["positions_closed"]
+                            paper_pnl += paper_result["total_pnl"]
+
+                            # Close LIVE positions
+                            live_result = _close_positions_for_market(
+                                session, market, outcome, live_position_manager, is_paper=False
+                            )
+                            live_positions_closed += live_result["positions_closed"]
+                            live_pnl += live_result["total_pnl"]
+
                             resolved_count += 1
-                            positions_closed += result["positions_closed"]
-                            total_pnl += result["total_pnl"]
 
                     # Update lifecycle fields
                     market.closed = market_data.get("closed", False)
@@ -675,23 +700,39 @@ def check_resolutions() -> dict:
             finally:
                 client.close()
 
+    total_positions_closed = paper_positions_closed + live_positions_closed
+    total_pnl = paper_pnl + live_pnl
+
     logger.info(
         "check_resolutions complete",
         resolved=resolved_count,
-        positions_closed=positions_closed,
-        total_pnl=total_pnl,
+        paper_positions_closed=paper_positions_closed,
+        live_positions_closed=live_positions_closed,
+        paper_pnl=paper_pnl,
+        live_pnl=live_pnl,
     )
     return {
         "checked": len(markets_with_positions_set),
         "resolved": resolved_count,
-        "positions_closed": positions_closed,
+        "positions_closed": total_positions_closed,
+        "paper_positions_closed": paper_positions_closed,
+        "live_positions_closed": live_positions_closed,
         "total_pnl": total_pnl,
+        "paper_pnl": paper_pnl,
+        "live_pnl": live_pnl,
     }
 
 
-def _close_positions_for_market(session, market, outcome, position_manager) -> dict:
+def _close_positions_for_market(session, market, outcome, position_manager, is_paper: bool = True) -> dict:
     """
     Helper to close positions and update balances for a resolved market.
+
+    Args:
+        session: Database session
+        market: Market that resolved
+        outcome: Resolution outcome (YES, NO, UNKNOWN)
+        position_manager: PositionManager instance (paper or live)
+        is_paper: Whether closing paper positions (updates balances) or live (no balance updates)
 
     Returns:
         Dictionary with positions_closed count and total_pnl
@@ -703,10 +744,11 @@ def _close_positions_for_market(session, market, outcome, position_manager) -> d
     positions_closed = 0
     total_pnl = 0.0
 
-    # Mark market as resolved
-    market.resolved = True
-    market.active = False
-    market.resolved_at = datetime.now(timezone.utc)
+    # Mark market as resolved (only once, not per position_manager)
+    if not market.resolved:
+        market.resolved = True
+        market.active = False
+        market.resolved_at = datetime.now(timezone.utc)
 
     # Close positions and calculate P&L
     results = position_manager.close_positions_on_resolution(
@@ -715,15 +757,20 @@ def _close_positions_for_market(session, market, outcome, position_manager) -> d
         db=session,
     )
 
-    # Update balances with payouts
+    # Update balances with payouts (ONLY for paper positions)
     if results:
-        paper_balance = session.query(PaperBalance).first()
-        if paper_balance:
-            for result in results:
-                # Add payout to balance
+        if is_paper:
+            paper_balance = session.query(PaperBalance).first()
+        else:
+            paper_balance = None  # Live positions: payout goes directly to Polymarket wallet
+
+        for result in results:
+            total_pnl += result["pnl"]
+            positions_closed += 1
+
+            # Update paper balances (ONLY for paper positions)
+            if paper_balance:
                 paper_balance.balance_usd += Decimal(str(result["payout"]))
-                total_pnl += result["pnl"]
-                positions_closed += 1
 
                 # Update strategy-specific balance
                 strategy_name = result["strategy_name"]
@@ -766,22 +813,24 @@ def _close_positions_for_market(session, market, outcome, position_manager) -> d
                         new_balance=strategy_balance.current_usd,
                     )
 
-                # Send Telegram alert
-                try:
-                    alert_position_closed(
-                        strategy=result["strategy_name"],
-                        market=market.slug,
-                        side=result["side"],
-                        outcome=outcome,
-                        cost_basis=result["cost_basis"],
-                        payout=result["payout"],
-                        pnl=result["pnl"],
-                        market_id=market.id,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to send Telegram alert: {e}")
+            # Send Telegram alert (for both paper and live)
+            mode_label = "PAPER" if is_paper else "LIVE"
+            try:
+                alert_position_closed(
+                    strategy=f"[{mode_label}] {result['strategy_name']}",
+                    market=market.slug,
+                    side=result["side"],
+                    outcome=outcome,
+                    cost_basis=result["cost_basis"],
+                    payout=result["payout"],
+                    pnl=result["pnl"],
+                    market_id=market.id,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send Telegram alert: {e}")
 
-            # Update paper balance totals
+        # Update paper balance totals (only for paper)
+        if paper_balance:
             new_balance = float(paper_balance.balance_usd)
             paper_balance.total_pnl = new_balance - float(paper_balance.starting_balance_usd)
             if new_balance > float(paper_balance.high_water_mark):

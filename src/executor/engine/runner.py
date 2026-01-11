@@ -105,6 +105,16 @@ class ExecutorRunner:
             try:
                 balance = self._live_executor.get_balance()
                 logger.info(f"LiveExecutor connected. Wallet balance: ${balance:.2f} USDC")
+
+                # CRITICAL: Reconcile wallet positions on startup
+                # This catches any fills that weren't tracked properly
+                logger.info("Running wallet reconciliation on startup...")
+                recon_result = self._live_executor.reconcile_wallet_positions()
+                if recon_result.get("untracked"):
+                    logger.warning(
+                        f"⚠️  Found {len(recon_result['untracked'])} untracked positions, "
+                        f"synced {recon_result['synced']}"
+                    )
             except Exception as e:
                 logger.error(f"LiveExecutor failed to connect: {e}")
                 raise
@@ -335,6 +345,9 @@ class ExecutorRunner:
 
         Creates TradeDecision audit records for every signal.
 
+        IMPORTANT: Live signals are prioritized and processed first to minimize
+        signal age. This ensures live signals don't wait behind paper signals.
+
         Args:
             signals: Generated signals
             balance: Current balance
@@ -347,8 +360,17 @@ class ExecutorRunner:
         seen_pairs: set[tuple[str, int]] = set()
         pending_by_strategy: defaultdict[str, int] = defaultdict(int)
 
-        for signal in signals:
+        # Prioritize live signals - process them first to minimize signal age
+        # Live signals have a 60s max age limit, paper signals do not
+        def is_live_signal(sig):
+            return self._is_strategy_live(sig.strategy_name)
+
+        sorted_signals = sorted(signals, key=is_live_signal, reverse=True)
+
+        for signal in sorted_signals:
             # Create Signal database record
+            # IMPORTANT: Copy created_at from dataclass to preserve actual signal generation time
+            # (not DB insert time which would add processing delay to signal age)
             signal_model = SignalModel(
                 strategy_name=signal.strategy_name,
                 market_id=signal.market_id,
@@ -361,6 +383,7 @@ class ExecutorRunner:
                 best_bid=signal.best_bid,
                 best_ask=signal.best_ask,
                 status=SignalStatus.PENDING.value,
+                created_at=signal.created_at,  # Preserve actual signal generation time
             )
 
             # Create TradeDecision audit record
@@ -464,12 +487,28 @@ class ExecutorRunner:
 
         Updates TradeDecision with execution outcome and sends Telegram alerts.
 
+        IMPORTANT: Live signals are prioritized and executed first to minimize
+        signal age. Paper signals are processed after all live signals complete.
+
         Args:
             approved_signals: List of (Signal, SignalModel, TradeDecision) tuples
             market_depth_map: Dict of market_id -> (bid_depth_10, ask_depth_10)
             db: Database session
         """
-        for signal, signal_model, decision in approved_signals:
+        # Prioritize live signals - execute them first to minimize signal age
+        # Live signals are time-sensitive (60s max age), paper signals are not
+        def is_live_signal(item):
+            signal, _, _ = item
+            return self._is_strategy_live(signal.strategy_name)
+
+        # Sort: live signals first (True > False when reversed)
+        sorted_signals = sorted(approved_signals, key=is_live_signal, reverse=True)
+
+        live_count = sum(1 for s in sorted_signals if is_live_signal(s))
+        if live_count > 0:
+            logger.info(f"Executing {live_count} LIVE signals first (prioritized)")
+
+        for signal, signal_model, decision in sorted_signals:
             try:
                 # Use correct position manager based on whether strategy is live
                 is_live = self._is_strategy_live(signal.strategy_name)
@@ -810,11 +849,16 @@ class ExecutorRunner:
         try:
             # Use correct executor based on whether position is paper or live
             if position.is_paper:
-                result = self.paper_executor.close_position(
+                result_obj = self.paper_executor.close_position(
                     position_id=position.id,
                     exit_price=exit_price,
                     reason=exit_signal.reason,
                 )
+                result = {
+                    'success': result_obj.success,
+                    'message': result_obj.message,
+                    'realized_pnl': getattr(result_obj, 'realized_pnl', 0),
+                }
             else:
                 # Live position - use live executor
                 from src.executor.execution.order_types import OrderType

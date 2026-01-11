@@ -34,6 +34,7 @@ class OrderResult:
     executed_usd: Optional[float] = None
     message: Optional[str] = None
     raw_response: Optional[dict] = None
+    position_id: Optional[int] = None
 
 
 @dataclass

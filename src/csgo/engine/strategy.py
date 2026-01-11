@@ -238,6 +238,10 @@ class CSGOStrategy(ABC):
     min_spread: float = 0.0  # Minimum spread to trade (0 = no filter)
     max_spread: float = 0.10  # Maximum spread to trade
 
+    # Extreme price protection - don't trade near-resolved markets
+    min_entry_price: float = 0.05  # Don't buy tokens below 5%
+    max_entry_price: float = 0.95  # Don't buy tokens above 95%
+
     def __init__(self, state_manager: "CSGOStateManager"):
         """
         Initialize with reference to state manager.
@@ -298,6 +302,13 @@ class CSGOStrategy(ABC):
         # Spread filter
         if tick.spread is not None:
             if tick.spread < self.min_spread or tick.spread > self.max_spread:
+                return False
+
+        # CRITICAL: Extreme price filter - don't trade near-resolved markets
+        # These have terrible liquidity (50%+ spreads) and are usually decided
+        yes_price = tick.yes_price
+        if yes_price is not None:
+            if yes_price < self.min_entry_price or yes_price > self.max_entry_price:
                 return False
 
         return True

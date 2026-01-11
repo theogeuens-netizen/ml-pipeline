@@ -648,6 +648,11 @@ class CSGOMatch(Base):
     game_id: Mapped[Optional[str]] = mapped_column(String(50))  # External reference
     map_number: Mapped[Optional[int]] = mapped_column(Integer)  # 1, 2, 3 for map winners; None for series
 
+    # GRID API integration
+    grid_series_id: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # GRID series ID
+    grid_yes_team_id: Mapped[Optional[str]] = mapped_column(String(50))  # Which GRID team = Polymarket YES
+    grid_match_confidence: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4))  # Match confidence 0-1
+
     # State
     subscribed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
@@ -715,3 +720,99 @@ class CSGOPriceTick(Base):
 
     # Calculated metrics
     price_velocity_1m: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+
+
+class CSGOGridEvent(Base):
+    """
+    GRID game state change events correlated with Polymarket prices.
+
+    Records score changes (round wins, map wins) detected from GRID API
+    along with prices at detection and after delays (30s, 1m, 5m).
+
+    Used for:
+    - Measuring price sensitivity to game state changes
+    - Measuring market latency (how fast markets reprice)
+    - Building fair value models
+    - Identifying front-running or mean reversion opportunities
+    """
+    __tablename__ = "csgo_grid_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Linking
+    market_id: Mapped[int] = mapped_column(Integer, index=True)  # CSGOMatch.market_id
+    event_id: Mapped[str] = mapped_column(String(100), index=True)  # Polymarket event group
+    grid_series_id: Mapped[str] = mapped_column(String(50), index=True)
+
+    # Timing
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    grid_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Event type
+    event_type: Mapped[str] = mapped_column(String(20))  # "round", "map", "series"
+    winner: Mapped[str] = mapped_column(String(5))  # "YES", "NO"
+
+    # Score BEFORE event
+    prev_round_yes: Mapped[int] = mapped_column(Integer)
+    prev_round_no: Mapped[int] = mapped_column(Integer)
+    prev_map_yes: Mapped[int] = mapped_column(Integer)
+    prev_map_no: Mapped[int] = mapped_column(Integer)
+
+    # Score AFTER event
+    new_round_yes: Mapped[int] = mapped_column(Integer)
+    new_round_no: Mapped[int] = mapped_column(Integer)
+    new_map_yes: Mapped[int] = mapped_column(Integer)
+    new_map_no: Mapped[int] = mapped_column(Integer)
+
+    # Context
+    format: Mapped[str] = mapped_column(String(10))  # "bo1", "bo3", "bo5"
+    map_number: Mapped[int] = mapped_column(Integer)
+    map_name: Mapped[Optional[str]] = mapped_column(String(50))
+    is_overtime: Mapped[bool] = mapped_column(Boolean, default=False)
+    rounds_in_event: Mapped[int] = mapped_column(Integer, default=1)  # >1 if missed rounds
+
+    # Derived (computed on insert for easy querying)
+    total_rounds_before: Mapped[int] = mapped_column(Integer)
+    round_diff_before: Mapped[int] = mapped_column(Integer)  # YES - NO
+    map_diff_before: Mapped[int] = mapped_column(Integer)
+
+    # Price at detection (from CLOB)
+    price_at_detection: Mapped[Decimal] = mapped_column(Numeric(10, 6))
+    spread_at_detection: Mapped[Decimal] = mapped_column(Numeric(10, 6))
+    best_bid_at_detection: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    best_ask_at_detection: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    price_source: Mapped[str] = mapped_column(String(20))  # "clob", "tick"
+
+    # Price after (filled by background task)
+    price_after_30sec: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    price_after_1min: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    price_after_5min: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+
+    # Analysis helpers (computed on fill)
+    price_move_30sec: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    price_move_1min: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    price_move_5min: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    move_direction_correct: Mapped[Optional[bool]] = mapped_column(Boolean)
+
+    # Market state
+    market_accepting_orders: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+
+    # Debug
+    grid_state_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class GRIDPollerState(Base):
+    """
+    Persisted state for GRID poller to survive restarts.
+
+    Stores the last known state for each series being polled,
+    allowing change detection to work across process restarts.
+    """
+    __tablename__ = "grid_poller_state"
+
+    series_id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    market_id: Mapped[int] = mapped_column(Integer, index=True)
+    last_state_json: Mapped[dict] = mapped_column(JSONB)
+    last_poll_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    polls_count: Mapped[int] = mapped_column(Integer, default=0)

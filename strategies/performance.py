@@ -46,6 +46,7 @@ class StrategyMetrics:
     win_count: int = 0
     loss_count: int = 0
     win_rate: float = 0.0
+    total_cost_basis: float = 0  # Sum of cost_basis for all closed trades
 
     # Risk metrics
     sharpe_ratio: Optional[float] = None
@@ -111,16 +112,25 @@ class PerformanceTracker:
         if created:
             self.session.commit()
 
-    def get_strategy_metrics(self, strategy_name: str) -> Optional[StrategyMetrics]:
+    def get_strategy_metrics(
+        self,
+        strategy_name: str,
+        live_only: bool = False
+    ) -> Optional[StrategyMetrics]:
         """
         Get comprehensive metrics for a single strategy.
 
         Args:
             strategy_name: Strategy name to analyze
+            live_only: If True, only include live (non-paper) positions
 
         Returns:
             StrategyMetrics or None if strategy not found
         """
+        # If live_only, calculate directly from positions
+        if live_only:
+            return self._get_live_only_metrics(strategy_name)
+
         # Seed balances so new strategies show up immediately in the UI
         self.ensure_strategy_balances()
 
@@ -194,6 +204,105 @@ class PerformanceTracker:
 
         return metrics
 
+    def _get_live_only_metrics(self, strategy_name: str) -> Optional[StrategyMetrics]:
+        """
+        Calculate metrics from live (non-paper) positions only.
+
+        This bypasses the StrategyBalance table and calculates directly from
+        positions where is_paper=False.
+        """
+        # Get closed live positions
+        closed = self.session.query(Position).filter(
+            Position.strategy_name == strategy_name,
+            Position.status == "closed",
+            Position.is_paper == False,
+        ).all()
+
+        # Get open live positions
+        open_positions = self.session.query(Position).filter(
+            Position.strategy_name == strategy_name,
+            Position.status == "open",
+            Position.is_paper == False,
+        ).all()
+
+        if not closed and not open_positions:
+            return None
+
+        # Calculate P&L from positions
+        realized_pnl = sum(float(p.realized_pnl or 0) for p in closed)
+        unrealized_pnl = sum(float(p.unrealized_pnl or 0) for p in open_positions)
+        total_pnl = realized_pnl + unrealized_pnl
+
+        # Count wins/losses
+        wins = [p for p in closed if float(p.realized_pnl or 0) > 0]
+        losses = [p for p in closed if float(p.realized_pnl or 0) < 0]
+        trade_count = len(closed)
+
+        # Total cost basis
+        total_cost_basis = sum(float(p.cost_basis or 0) for p in closed)
+        open_cost_basis = sum(float(p.cost_basis or 0) for p in open_positions)
+
+        # Estimated allocated (use 400 as default, but could be tracked separately)
+        allocated_usd = 400.0
+        current_usd = allocated_usd - open_cost_basis + realized_pnl
+
+        metrics = StrategyMetrics(
+            strategy_name=strategy_name,
+            allocated_usd=allocated_usd,
+            current_usd=round(current_usd, 2),
+            total_pnl=round(total_pnl, 2),
+            realized_pnl=round(realized_pnl, 2),
+            unrealized_pnl=round(unrealized_pnl, 2),
+            trade_count=trade_count,
+            win_count=len(wins),
+            loss_count=len(losses),
+            total_cost_basis=total_cost_basis,
+            open_positions=len(open_positions),
+        )
+
+        # Calculate derived metrics
+        if metrics.trade_count > 0:
+            metrics.win_rate = metrics.win_count / metrics.trade_count
+
+        if metrics.allocated_usd > 0:
+            metrics.total_return_pct = (metrics.total_pnl / metrics.allocated_usd) * 100
+
+        # Avg win/loss
+        if wins:
+            metrics.avg_win_usd = sum(float(p.realized_pnl) for p in wins) / len(wins)
+        if losses:
+            metrics.avg_loss_usd = sum(float(p.realized_pnl) for p in losses) / len(losses)
+
+        # Profit factor
+        gross_profit = sum(float(p.realized_pnl) for p in wins) if wins else 0
+        gross_loss = abs(sum(float(p.realized_pnl) for p in losses)) if losses else 0
+        if gross_loss > 0:
+            metrics.profit_factor = gross_profit / gross_loss
+
+        # Expectancy
+        if metrics.trade_count > 0:
+            metrics.expectancy_usd = metrics.realized_pnl / metrics.trade_count
+
+        # Hold time
+        hold_times = []
+        for p in closed:
+            if p.entry_time and p.exit_time:
+                delta = p.exit_time - p.entry_time
+                hold_times.append(delta.total_seconds() / 3600)
+        if hold_times:
+            metrics.avg_hold_hours = sum(hold_times) / len(hold_times)
+
+        # Time range
+        sorted_by_exit = sorted(
+            [p for p in closed if p.exit_time],
+            key=lambda p: p.exit_time
+        )
+        if sorted_by_exit:
+            metrics.first_trade = sorted_by_exit[0].exit_time
+            metrics.last_trade = sorted_by_exit[-1].exit_time
+
+        return metrics
+
     def _calculate_position_stats(self, metrics: StrategyMetrics):
         """Calculate stats from closed and open positions."""
         # Always count open positions first
@@ -210,6 +319,12 @@ class PerformanceTracker:
 
         if not closed:
             return
+
+        # Total cost basis for all closed trades (for ROI calculation)
+        metrics.total_cost_basis = sum(
+            float(p.cost_basis) if p.cost_basis else 0
+            for p in closed
+        )
 
         wins = [p for p in closed if float(p.realized_pnl) > 0]
         losses = [p for p in closed if float(p.realized_pnl) < 0]
@@ -305,7 +420,8 @@ class PerformanceTracker:
     def get_leaderboard(
         self,
         sort_by: str = "total_pnl",
-        limit: int = 25
+        limit: int = 25,
+        live_only: bool = False
     ) -> list[StrategyMetrics]:
         """
         Get leaderboard of all strategies sorted by performance.
@@ -313,21 +429,35 @@ class PerformanceTracker:
         Args:
             sort_by: Metric to sort by (total_pnl, sharpe_ratio, win_rate, etc.)
             limit: Max strategies to return
+            live_only: If True, only include live (non-paper) positions
 
         Returns:
             List of StrategyMetrics sorted by chosen metric
         """
-        # Ensure we have balance rows for every enabled strategy (including newly added)
-        self.ensure_strategy_balances()
+        if live_only:
+            # Get unique strategy names from live positions
+            strategy_names = self.session.query(Position.strategy_name).filter(
+                Position.is_paper == False
+            ).distinct().all()
+            strategy_names = [name for (name,) in strategy_names]
 
-        # Get all strategy names
-        balances = self.session.query(StrategyBalance).all()
+            metrics_list = []
+            for name in strategy_names:
+                metrics = self.get_strategy_metrics(name, live_only=True)
+                if metrics:
+                    metrics_list.append(metrics)
+        else:
+            # Ensure we have balance rows for every enabled strategy (including newly added)
+            self.ensure_strategy_balances()
 
-        metrics_list = []
-        for balance in balances:
-            metrics = self.get_strategy_metrics(balance.strategy_name)
-            if metrics:
-                metrics_list.append(metrics)
+            # Get all strategy names
+            balances = self.session.query(StrategyBalance).all()
+
+            metrics_list = []
+            for balance in balances:
+                metrics = self.get_strategy_metrics(balance.strategy_name)
+                if metrics:
+                    metrics_list.append(metrics)
 
         # Sort by chosen metric
         def get_sort_key(m: StrategyMetrics):

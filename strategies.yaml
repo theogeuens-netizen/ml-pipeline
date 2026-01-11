@@ -38,13 +38,8 @@ uncertain_zone:
     max_hours: 38
     expected_no_rate: 0.58         # 58% expected NO win rate
 
-  # Short-window variants (2-4h) with same parameters to test pre-close performance
-  - name: no_bias_tight_2h
-    yes_price_min: 0.48
-    yes_price_max: 0.52
-    min_hours: 2
-    max_hours: 4
-    expected_no_rate: 0.55
+  # KILLED: no_bias_tight_2h - 43.8% WR, -$126.94 P&L (analysis-002)
+  # Learning: 2h tight window needs category filters to work
 
   - name: no_bias_tight_2h_spread2
     yes_price_min: 0.48
@@ -64,25 +59,59 @@ uncertain_zone:
     excluded_categories:
       - CRYPTO
 
-  - name: no_bias_tight_2h_no_sports
-    yes_price_min: 0.48
-    yes_price_max: 0.52
-    min_hours: 2
-    max_hours: 4
-    expected_no_rate: 0.55
-    excluded_categories:
-      - SPORTS
+  # KILLED: no_bias_tight_2h_no_sports - 43.1% WR, -$164.89 P&L (analysis-002)
+  # Learning: Excluding SPORTS actually hurts performance vs excluding CRYPTO+SPORTS
 
   - name: no_bias_tight_2h_no_crypto_sports
-    live: false  # PAUSED - investigating 10% fees
+    live: true  # ENABLED - Option B filters with esports handicap
+    max_positions: 20           # Max 20 concurrent live positions
     yes_price_min: 0.48
     yes_price_max: 0.52
     min_hours: 2
     max_hours: 4
     expected_no_rate: 0.55
+    size_pct: 0.01            # 1% of wallet (~$1 per trade) for live
     excluded_categories:
       - CRYPTO
-      - SPORTS
+      - SPORTS              # Exclude SPORTS except whitelisted L3s below
+    # Whitelist specific L3 categories from excluded L1s (Option B - moderate)
+    # Based on statistical analysis: SPREAD (69% WR, z=1.96), OVER_UNDER (56% WR), PROP_PLAYER (55% WR)
+    include_l3_from_excluded_l1:
+      SPORTS:
+        - SPREAD            # 69.2% WR, statistically significant (z=1.96)
+        - OVER_UNDER        # 55.7% WR, high volume
+        - PROP_PLAYER       # 55.0% WR, decent volume
+    # Exclude L2 categories with proven negative edge
+    excluded_l2_categories:
+      - TEMPERATURE         # 0% WR, -$22 P&L, statistically significant loser (z=-2.45)
+    # Pattern-based exclusions for uncategorized markets
+    exclude_patterns:
+      - "temperature"
+      - "°F"
+      - "°C"
+      - "Map \\d+ Winner"         # Individual map winners: 38% WR, -$17 (n=111, statistically significant)
+      - "Game Handicap:"          # Different handicap format: 33% WR, -$79 (n=18)
+    # CRITICAL: Whitelist patterns for uncategorized markets
+    # NOTE: Patterns must be precise to avoid matching unrelated markets (e.g., dates)
+    # Analysis (235 resolved trades, +$190 P&L):
+    # - Esports handicap: 81.6% WR, +$112
+    # - O/U (football/NBA): 65-71% WR, +$62
+    # - Spread: 72% WR, +$41
+    # - Props: 55% WR, +$10
+    # - O/U (college BB 100-180): 48.7% WR, -$6 (accepted loss)
+    include_patterns:
+      - "\\bspread\\b"              # Point spreads (72% WR)
+      - "O/U \\d"                   # O/U format
+      - ": O/U"                     # O/U format
+      - "over \\d+\\.5"             # Player props over
+      - "under \\d+\\.5"            # Player props under
+      - "\\(\\+\\d+\\.5\\)"         # Spread notation (+7.5)
+      - "\\(-\\d+\\.5\\)"           # Spread notation (-7.5)
+      - "total.*points"             # Total points O/U
+      - "total.*goals"              # Total goals O/U
+      - "total.*runs"               # Total runs O/U
+      - "total.*maps"               # Total maps O/U
+      - "to win \\d+ (maps|games)"  # Esports handicap (81.6% WR, +$112)
 
   # =========================================================================
   # P0 OPTIMIZATION: Filtered variant excluding underperforming segments
@@ -146,11 +175,14 @@ uncertain_zone:
     min_hours: 2
     max_hours: 4
     expected_no_rate: 0.73         # 73% from historical backtest (322 trades)
-    size_pct: 0.03                 # 3% per trade (high conviction)
+    size_pct: 0.05                 # 5% per trade (high conviction)
     categories:
       - ESPORTS                    # Only trade ESPORTS
     excluded_l3_categories:
       - MAP_WINNER                 # 44-46% WR, reverse bias on individual maps
+    exclude_patterns:
+      - "Map \\d+ Winner"          # Individual map winners: 38% WR (n=111)
+      - "Game Handicap:"           # Different handicap format: 33% WR (n=18)
     # Backtest: Jan 5, 2026 - 47.8M snapshots, 24.8K resolved markets
     # ESPORTS 0.48-0.50: 322 trades, 73.3% WR, +$0.237/dollar
     # ESPORTS 0.50-0.52: 187 trades, 42.2% WR, -$0.085/dollar (LOSING)
@@ -218,12 +250,8 @@ uncertain_zone:
     max_hours: 14
     expected_no_rate: 0.52         # Slightly higher expectation variant
 
-  - name: no_bias_underdog_24h
-    yes_price_min: 0.55
-    yes_price_max: 0.70
-    min_hours: 24
-    max_hours: 26
-    expected_no_rate: 0.52         # Slightly higher edge at 24h
+  # KILLED: no_bias_underdog_24h - 34.9% WR, -$114.35 P&L (analysis-002)
+  # Learning: Underdog NO bias does not exist. Cheap NOs are cheap for a reason.
 
   - name: no_bias_underdog_36h
     yes_price_min: 0.55
@@ -232,13 +260,8 @@ uncertain_zone:
     max_hours: 38
     expected_no_rate: 0.54         # Best edge at 36h
 
-  # Short-window underdog variants (2-4h)
-  - name: no_bias_underdog_2h
-    yes_price_min: 0.55
-    yes_price_max: 0.70
-    min_hours: 2
-    max_hours: 4
-    expected_no_rate: 0.50
+  # KILLED: no_bias_underdog_2h - 38.6% WR, -$135.89 P&L (analysis-002)
+  # Learning: Underdog NO bias does not exist in any time window.
 
   # =========================================================================
   # GROUP C: Spread Filter Variants (Tight 12-14h with max spread)
@@ -302,73 +325,23 @@ uncertain_zone:
   # Deployed: 2024-12-25
   # =========================================================================
 
-  # 24-96h window variants
-  - name: favorite_no_24_96h_v100
-    yes_price_min: 0.70
-    yes_price_max: 0.95
-    min_hours: 24
-    max_hours: 96
-    expected_no_rate: 0.70         # From exp-004 backtest (72.9% actual)
-    min_volume: 100
-    # Experiment: exp-004:v4+v6+v8
-
-  - name: favorite_no_24_96h_v100_no_crypto_sports
-    yes_price_min: 0.70
-    yes_price_max: 0.95
-    min_hours: 24
-    max_hours: 96
-    expected_no_rate: 0.70
-    min_volume: 100
-    excluded_categories:
-      - CRYPTO
-      - SPORTS
-
-  - name: favorite_no_24_96h_v500
-    yes_price_min: 0.70
-    yes_price_max: 0.95
-    min_hours: 24
-    max_hours: 96
-    expected_no_rate: 0.70
-    min_volume: 500
-    # Experiment: exp-004:v4+v6+v9
-
-  # 48-168h window variants
-  - name: favorite_no_48_168h_v100
-    yes_price_min: 0.70
-    yes_price_max: 0.95
-    min_hours: 48
-    max_hours: 168
-    expected_no_rate: 0.70
-    min_volume: 100
-    # Experiment: exp-004:v4+v7+v8
-
-  - name: favorite_no_48_168h_v500
-    yes_price_min: 0.70
-    yes_price_max: 0.95
-    min_hours: 48
-    max_hours: 168
-    expected_no_rate: 0.70
-    min_volume: 500
-    # Experiment: exp-004:v4+v7+v9
-
-  # Top categories only - highest edge from exp-004 category analysis
-  # WEATHER 89%, SCIENCE 86%, ESPORTS 85%, TECH 84%, OTHER 82% WR
-  - name: favorite_no_24_96h_top_cats
-    yes_price_min: 0.70
-    yes_price_max: 0.95
-    min_hours: 24
-    max_hours: 96
-    expected_no_rate: 0.85         # Higher rate for top categories (avg 85% WR)
-    min_volume: 100
-    size_pct: 0.10                 # 10% per trade (higher conviction, fewer opportunities)
-    categories:
-      - WEATHER
-      - SCIENCE
-      - ESPORTS
-      - TECH
-      - OTHER
-    # Experiment: exp-004:v4+v6 with L1 category filter
-    # Expected: ~3.4K trades, 80-89% WR, Sharpe 25-33
+  # =============================================================================
+  # KILLED: ALL FAVORITE ZONE STRATEGIES (analysis-002, Jan 8 2026)
+  # =============================================================================
+  # favorite_no_24_96h_v100: 15.8% WR, -$151.18 P&L
+  # favorite_no_24_96h_v100_no_crypto_sports: 13.2% WR, -$121.36 P&L
+  # favorite_no_24_96h_v500: 19.1% WR, -$85.20 P&L
+  # favorite_no_48_168h_v100: 14.5% WR, -$53.69 P&L
+  # favorite_no_48_168h_v500: 12.0% WR, -$85.02 P&L
+  # favorite_no_24_96h_top_cats: 21.4% WR, -$190.37 P&L
+  #
+  # CRITICAL LEARNINGS:
+  # 1. FAVORITE BIAS DOES NOT EXIST IN LIVE - 73% backtest WR became 12-21% live WR
+  # 2. CRYPTO has 0% WR in favorite zone - reverse bias
+  # 3. POLITICS has 0% WR in favorite zone
+  # 4. High-conviction sizing (10%) amplifies losses on broken strategies
+  # 5. Volume filters ($100, $500) don't fix fundamentally broken thesis
+  # =============================================================================
 
 # =============================================================================
 # LONGSHOT STRATEGIES
@@ -418,18 +391,45 @@ longshot:
 # Backtest: 80% WR on CRYPTO/ESPORTS with tight spreads
 # =============================================================================
 book_imbalance_momentum:
-  - name: book_imbalance_crypto_esports
+  # =========================================================================
+  # CRYPTO-ONLY LIVE VERSION (safeguards enabled Jan 11, 2026)
+  # Paper: 199 CRYPTO trades, 89.9% WR, +$800 P&L
+  # ESPORTS removed: 41.7% WR, CSGO NO was 0% WR (9 trades, all losses)
+  # Safeguards: small size ($2), low max positions (3), 5min buffer
+  # =========================================================================
+  - name: book_imbalance_crypto
+    live: true                      # ENABLED with safeguards
+    max_positions: 3                # Conservative: 3 concurrent
+    fixed_size_usd: 1.1             # Ultra-conservative: $1.1 per trade
     min_imbalance: 0.5              # |imbalance| > 50% required
     yes_price_min: 0.30             # Price zone 30-70%
     yes_price_max: 0.70
-    max_spread: 0.01                # 1c max spread for execution quality
+    max_spread: 0.02                # 2c max spread
+    min_minutes_to_close: 5         # Conservative: 5 min buffer (was 2)
     categories:
-      - CRYPTO                      # 86% WR on buys
-      - ESPORTS                     # 84% WR on sells
+      - CRYPTO                      # 89.9% WR in paper (199 trades)
     max_hold_hours: 1.0             # Exit after 1 hour
-    profit_target_pct: 0.05         # Or exit at 5% profit
+    profit_target_pct: 1.0          # Disabled - hold to resolution
     cooldown_minutes: 60            # 60 min between entries same market
-    size_pct: 0.01                  # 1% per trade
+    size_pct: 0.05                  # Fallback if fixed_size_usd not used
+
+  # Paper-only version with ESPORTS for continued monitoring
+  - name: book_imbalance_crypto_esports
+    # live: false                   # Paper only - ESPORTS underperforms
+    max_positions: 4                # Max 4 concurrent positions
+    fixed_size_usd: 5.0             # Fixed $5 per trade
+    min_imbalance: 0.5              # |imbalance| > 50% required
+    yes_price_min: 0.30             # Price zone 30-70%
+    yes_price_max: 0.70
+    max_spread: 0.02                # 2c max spread
+    min_minutes_to_close: 2         # Don't trade if < 2 min to close
+    categories:
+      - CRYPTO                      # 89.9% WR
+      - ESPORTS                     # 41.7% WR - monitoring only
+    max_hold_hours: 1.0             # Exit after 1 hour
+    profit_target_pct: 1.0          # Disabled - hold to resolution
+    cooldown_minutes: 60            # 60 min between entries same market
+    size_pct: 0.05                  # Fallback if fixed_size_usd not used
 
 # =============================================================================
 # XGBOOST IMBALANCE MOMENTUM STRATEGIES
@@ -452,7 +452,7 @@ xgb_imbalance:
     min_imbalance: 0.50             # |imbalance| > 50% required
     max_spread: 0.01                # 1c max spread
     max_hold_hours: 1.0             # Exit after 1 hour
-    base_size_pct: 0.005            # 0.5% base, scales to 0.75% at 95%+ confidence
+    base_size_pct: 0.05             # 5% per trade
     max_positions: 20               # Max concurrent positions
     cooldown_minutes: 60            # 60 min between entries same market
     enabled: true
@@ -470,7 +470,7 @@ xgb_imbalance:
     min_imbalance: 0.50
     max_spread: 0.01
     max_hold_hours: 1.0
-    base_size_pct: 0.0075           # 0.75% base (higher conviction)
+    base_size_pct: 0.05             # 5% per trade
     max_positions: 20
     cooldown_minutes: 60
     enabled: true

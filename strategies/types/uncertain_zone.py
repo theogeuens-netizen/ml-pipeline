@@ -1,5 +1,6 @@
 """Uncertain Zone Strategy - Bet in uncertain zone (45-55%) based on category-specific biases."""
 
+import re
 from typing import Iterator
 from strategies.base import Strategy, Signal, Side, MarketData
 
@@ -34,12 +35,17 @@ class UncertainZoneStrategy(Strategy):
         excluded_l2_categories: list = None,  # Optional: exclude these L2 categories
         l3_categories: list = None,  # Optional: only trade these L3 categories
         excluded_l3_categories: list = None,  # Optional: exclude these L3 categories
+        include_l3_from_excluded_l1: dict = None,  # e.g., {"SPORTS": ["SPREAD", "OVER_UNDER"]} - whitelist L3s from excluded L1
+        exclude_patterns: list = None,  # Optional: exclude markets matching these question patterns
+        include_patterns: list = None,  # Optional: ALLOW uncategorized markets matching these patterns
         size_pct: float = 0.01,
         order_type: str = "market",
+        max_positions: int = None,  # Max concurrent positions for live trading
         **kwargs,
     ):
         self.name = name
-        self.version = "2.5.0"  # Added side parameter for YES/NO bias
+        self.version = "2.5.1"  # Added max_positions parameter
+        self.max_positions = max_positions
         self.yes_price_min = yes_price_min
         self.yes_price_max = yes_price_max
         self.min_hours = min_hours
@@ -56,6 +62,9 @@ class UncertainZoneStrategy(Strategy):
         self.excluded_l2_categories = excluded_l2_categories or []
         self.l3_categories = l3_categories or []
         self.excluded_l3_categories = excluded_l3_categories or []
+        self.include_l3_from_excluded_l1 = include_l3_from_excluded_l1 or {}
+        self.exclude_patterns = exclude_patterns or []
+        self.include_patterns = include_patterns or []  # Whitelist patterns for uncategorized markets
         self.size_pct = size_pct
         self.order_type = order_type
         super().__init__()
@@ -71,13 +80,31 @@ class UncertainZoneStrategy(Strategy):
                     continue
 
             # L1 Category filter
-            # CRITICAL: If excluded_categories is set, also exclude uncategorized markets (None)
-            # This prevents uncategorized markets from bypassing exclusion filters
+            # Handle uncategorized markets: allow if they match include_patterns
             if self.excluded_categories:
                 if m.category_l1 is None:
-                    continue  # Reject uncategorized markets when exclusions are active
-                if m.category_l1 in self.excluded_categories:
-                    continue
+                    # Uncategorized market - check if it matches include_patterns
+                    if self.include_patterns:
+                        question = getattr(m, 'question', '') or ''
+                        pattern_match = False
+                        for pattern in self.include_patterns:
+                            if re.search(pattern, question, re.IGNORECASE):
+                                pattern_match = True
+                                break
+                        if not pattern_match:
+                            continue  # Uncategorized and doesn't match whitelist patterns
+                        # else: matches whitelist pattern, allow through
+                    else:
+                        continue  # No include_patterns defined, reject uncategorized
+                elif m.category_l1 in self.excluded_categories:
+                    # Check if this L1 has whitelisted L3 categories
+                    if m.category_l1 in self.include_l3_from_excluded_l1:
+                        allowed_l3s = self.include_l3_from_excluded_l1[m.category_l1]
+                        if m.category_l3 not in allowed_l3s:
+                            continue  # L3 not in whitelist, skip
+                        # else: L3 is whitelisted, allow through
+                    else:
+                        continue  # No whitelist for this L1, skip
             if self.categories and m.category_l1 not in self.categories:
                 continue
 
@@ -91,6 +118,10 @@ class UncertainZoneStrategy(Strategy):
             if self.l3_categories and m.category_l3 not in self.l3_categories:
                 continue
             if self.excluded_l3_categories and m.category_l3 in self.excluded_l3_categories:
+                continue
+
+            # Pattern-based exclusions (for uncategorized markets or additional filtering)
+            if not self._passes_pattern_filters(m):
                 continue
 
             # Time window - must be positive and within range
@@ -187,7 +218,15 @@ class UncertainZoneStrategy(Strategy):
             if m.category_l1 is None:
                 return False  # Reject uncategorized markets
             if m.category_l1 in self.excluded_categories:
-                return False
+                # Check if this L1 has whitelisted L3 categories
+                if m.category_l1 in self.include_l3_from_excluded_l1:
+                    allowed_l3s = self.include_l3_from_excluded_l1[m.category_l1]
+                    if m.category_l3 in allowed_l3s:
+                        pass  # Allow this market through
+                    else:
+                        return False  # L3 not in whitelist, reject
+                else:
+                    return False  # No whitelist for this L1, reject
         if self.categories and m.category_l1 not in self.categories:
             return False
         # L2 filter
@@ -200,6 +239,16 @@ class UncertainZoneStrategy(Strategy):
             return False
         if self.excluded_l3_categories and m.category_l3 in self.excluded_l3_categories:
             return False
+        return True
+
+    def _passes_pattern_filters(self, m: MarketData) -> bool:
+        """Check if market passes pattern-based filters."""
+        if not self.exclude_patterns:
+            return True
+        question = getattr(m, 'question', '') or ''
+        for pattern in self.exclude_patterns:
+            if re.search(pattern, question, re.IGNORECASE):
+                return False
         return True
 
     def get_debug_stats(self, markets: list[MarketData]) -> dict:

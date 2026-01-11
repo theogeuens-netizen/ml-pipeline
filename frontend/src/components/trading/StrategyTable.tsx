@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { clsx } from 'clsx'
 import { useLeaderboard, useStrategyBalances } from '../../hooks/useAnalystData'
 
-type SortField = 'name' | 'total_pnl' | 'return_pct' | 'sharpe_ratio' | 'max_drawdown_pct' | 'win_rate' | 'trade_count' | 'unrealized_pnl' | 'realized_pnl'
+type SortField = 'name' | 'total_pnl' | 'return_pct' | 'sharpe_ratio' | 'max_drawdown_pct' | 'win_rate' | 'trade_count' | 'unrealized_pnl' | 'realized_pnl' | 'pnl_per_trade' | 'pnl_per_trade_pct'
 type SortDirection = 'asc' | 'desc'
 
 interface StrategyRow {
@@ -19,6 +19,8 @@ interface StrategyRow {
   win_rate: number
   trade_count: number
   open_positions: number
+  pnl_per_trade: number
+  pnl_per_trade_pct: number
   hasAlert: boolean
   alertReason?: string
 }
@@ -105,6 +107,8 @@ export default function StrategyTable() {
         win_rate: (s.win_rate ?? 0) * 100,
         trade_count: s.trade_count ?? 0,
         open_positions: s.open_positions ?? 0,
+        pnl_per_trade: (s.trade_count ?? 0) > 0 ? (s.realized_pnl ?? 0) / (s.trade_count ?? 1) : 0,
+        pnl_per_trade_pct: (s.total_cost_basis ?? 0) > 0 ? ((s.realized_pnl ?? 0) / (s.total_cost_basis ?? 1)) * 100 : 0,
         hasAlert: hasLowSharpe || hasHighDrawdown,
         alertReason: hasLowSharpe
           ? 'Sharpe < 0'
@@ -181,6 +185,8 @@ export default function StrategyTable() {
               <SortHeader label="Unrealized" field="unrealized_pnl" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
               <SortHeader label="Realized" field="realized_pnl" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
               <SortHeader label="Total P&L" field="total_pnl" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
+              <SortHeader label="$/Trade" field="pnl_per_trade" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
+              <SortHeader label="%/Trade" field="pnl_per_trade_pct" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
               <SortHeader label="Return" field="return_pct" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
               <SortHeader label="Drawdown" field="max_drawdown_pct" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
               <SortHeader label="Sharpe" field="sharpe_ratio" currentSort={sortField} direction={sortDirection} onSort={handleSort} />
@@ -240,6 +246,18 @@ export default function StrategyTable() {
                   </td>
                   <td className={clsx(
                     'py-3 px-3 text-right font-mono',
+                    strategy.pnl_per_trade >= 0 ? 'text-green-400' : 'text-red-400'
+                  )}>
+                    {formatCurrency(strategy.pnl_per_trade, true)}
+                  </td>
+                  <td className={clsx(
+                    'py-3 px-3 text-right font-mono',
+                    strategy.pnl_per_trade_pct >= 0 ? 'text-green-400' : 'text-red-400'
+                  )}>
+                    {formatPercent(strategy.pnl_per_trade_pct, true)}
+                  </td>
+                  <td className={clsx(
+                    'py-3 px-3 text-right font-mono',
                     strategy.return_pct >= 0 ? 'text-green-400' : 'text-red-400'
                   )}>
                     {formatPercent(strategy.return_pct, true)}
@@ -274,7 +292,7 @@ export default function StrategyTable() {
                 </tr>
                 {expandedRow === strategy.name && (
                   <tr key={`${strategy.name}-expanded`} className="bg-gray-900/50">
-                    <td colSpan={13} className="py-4 px-6">
+                    <td colSpan={15} className="py-4 px-6">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div>
                           <p className="text-gray-500 text-xs mb-1">Alert Status</p>

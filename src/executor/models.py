@@ -45,7 +45,9 @@ class SignalStatus(str, Enum):
 
 class OrderStatus(str, Enum):
     """Order lifecycle status."""
-    PENDING = "pending"      # Submitted, awaiting fill
+    PENDING = "pending"      # Created, not yet submitted
+    SUBMITTED = "submitted"  # Submitted to exchange, awaiting fill
+    OPEN = "open"            # On book, not yet filled (after timeout)
     PARTIAL = "partial"      # Partially filled
     FILLED = "filled"        # Fully filled
     CANCELLED = "cancelled"  # Cancelled before fill

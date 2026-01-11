@@ -693,7 +693,7 @@ async def get_live_trading_summary(db: Session = Depends(get_db)):
                 "win_rate": round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0,
             })
 
-        # Format open positions
+        # Format open positions from database
         formatted_positions = []
         market_ids = [p.market_id for p in open_live_positions if p.market_id]
         if market_ids:
@@ -701,6 +701,9 @@ async def get_live_trading_summary(db: Session = Depends(get_db)):
             markets = {m.id: m for m in db.execute(markets_query).scalars().all()}
         else:
             markets = {}
+
+        # Track token IDs we have in DB
+        tracked_token_ids = set(p.token_id for p in open_live_positions)
 
         for p in open_live_positions:
             market = markets.get(p.market_id)
@@ -717,7 +720,68 @@ async def get_live_trading_summary(db: Session = Depends(get_db)):
                 "unrealized_pnl": float(p.unrealized_pnl) if p.unrealized_pnl else 0,
                 "unrealized_pnl_pct": float(p.unrealized_pnl_pct) * 100 if p.unrealized_pnl_pct else 0,
                 "entry_time": p.entry_time.isoformat() if p.entry_time else None,
+                "tracked": True,
             })
+
+        # Fetch wallet positions from Polymarket and add untracked ones
+        # Only show positions on OPEN markets (not resolved)
+        wallet_positions = []
+        untracked_positions = []
+        try:
+            wallet_positions = client.get_positions() or []
+            for wp in wallet_positions:
+                token_id = wp.get('asset_id')
+                size = float(wp.get('size', 0))
+                if size > 0 and token_id and token_id not in tracked_token_ids:
+                    # This position is on the wallet but not tracked in our DB
+                    avg_price = float(wp.get('avg_price', 0))
+                    # Try to find market info by token_id
+                    market = db.query(Market).filter(
+                        (Market.yes_token_id == token_id) | (Market.no_token_id == token_id)
+                    ).first()
+
+                    # Skip positions on resolved markets - only show OPEN positions
+                    if market and market.resolved:
+                        continue
+
+                    # Get current price from orderbook if possible
+                    current_price = avg_price
+                    try:
+                        ob = client.get_orderbook(token_id)
+                        bids = ob.get('bids', []) if isinstance(ob, dict) else []
+                        if bids:
+                            current_price = float(bids[0].get('price', avg_price))
+                    except Exception:
+                        pass
+
+                    cost_basis = size * avg_price
+                    current_value = size * current_price
+
+                    untracked_positions.append({
+                        "id": None,
+                        "strategy_name": "UNTRACKED",
+                        "market_title": market.question if market else f"Token {token_id[:16]}...",
+                        "token_side": "YES" if market and token_id == market.yes_token_id else "NO" if market else "?",
+                        "entry_price": avg_price,
+                        "current_price": current_price,
+                        "size_shares": size,
+                        "cost_basis": round(cost_basis, 2),
+                        "current_value": round(current_value, 2),
+                        "unrealized_pnl": round(current_value - cost_basis, 2),
+                        "unrealized_pnl_pct": round((current_value - cost_basis) / cost_basis * 100, 1) if cost_basis > 0 else 0,
+                        "entry_time": None,
+                        "tracked": False,
+                        "token_id": token_id,
+                    })
+        except Exception as e:
+            logger.warning(f"Could not fetch wallet positions: {e}")
+
+        # Update wallet totals to include untracked positions
+        wallet_position_value = position_value + sum(p["current_value"] for p in untracked_positions)
+        wallet_cost_basis = cost_basis + sum(p["cost_basis"] for p in untracked_positions)
+
+        # Combine tracked and untracked positions
+        all_open_positions = formatted_positions + untracked_positions
 
         return {
             "success": True,
@@ -725,8 +789,8 @@ async def get_live_trading_summary(db: Session = Depends(get_db)):
             "wallet": {
                 "address": wallet_address,
                 "balance": round(wallet_balance, 2),
-                "position_value": round(position_value, 2),
-                "total_value": round(wallet_balance + position_value, 2),
+                "position_value": round(wallet_position_value, 2),
+                "total_value": round(wallet_balance + wallet_position_value, 2),
             },
             "pnl": {
                 "unrealized": round(unrealized_pnl, 2),
@@ -735,12 +799,14 @@ async def get_live_trading_summary(db: Session = Depends(get_db)):
             },
             "positions": {
                 "open": len(open_live_positions),
+                "open_wallet": len(wallet_positions) if wallet_positions else 0,
+                "untracked": len(untracked_positions),
                 "closed": len(closed_live_positions),
-                "cost_basis": round(cost_basis, 2),
+                "cost_basis": round(wallet_cost_basis, 2),
             },
             "trades_count": live_trades,
             "strategies": strategy_stats,
-            "open_positions": formatted_positions,
+            "open_positions": all_open_positions,
         }
 
     except Exception as e:
@@ -1013,6 +1079,7 @@ async def get_strategy_leaderboard(
     sort_by: str = Query("total_pnl", description="Sort metric"),
     limit: int = Query(50, ge=1, le=100),
     exclude_csgo: bool = Query(False, description="Exclude CSGO strategies"),
+    live_only: bool = Query(False, description="Only include live (non-paper) positions"),
     db: Session = Depends(get_db),
 ):
     """
@@ -1023,7 +1090,7 @@ async def get_strategy_leaderboard(
     from strategies.performance import PerformanceTracker
 
     tracker = PerformanceTracker(db)
-    metrics_list = tracker.get_leaderboard(sort_by=sort_by, limit=limit)
+    metrics_list = tracker.get_leaderboard(sort_by=sort_by, limit=limit, live_only=live_only)
 
     # Filter out CSGO strategies if requested
     if exclude_csgo:
@@ -1039,6 +1106,7 @@ async def get_strategy_leaderboard(
 @router.get("/strategies/{strategy_name}/metrics")
 async def get_strategy_metrics(
     strategy_name: str,
+    live_only: bool = Query(False, description="Only include live (non-paper) positions"),
     db: Session = Depends(get_db),
 ):
     """
@@ -1047,7 +1115,7 @@ async def get_strategy_metrics(
     from strategies.performance import PerformanceTracker
 
     tracker = PerformanceTracker(db)
-    metrics = tracker.get_strategy_metrics(strategy_name)
+    metrics = tracker.get_strategy_metrics(strategy_name, live_only=live_only)
 
     if not metrics:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_name} not found")
@@ -1892,6 +1960,7 @@ def _format_strategy_metrics(m) -> dict:
         "win_count": m.win_count,
         "loss_count": m.loss_count,
         "win_rate": m.win_rate,
+        "total_cost_basis": m.total_cost_basis,
         "sharpe_ratio": m.sharpe_ratio,
         "sortino_ratio": m.sortino_ratio,
         "max_drawdown_usd": m.max_drawdown_usd,

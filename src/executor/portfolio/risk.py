@@ -9,6 +9,7 @@ Enforces risk limits before signal execution:
 """
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -19,6 +20,47 @@ from strategies.base import Signal
 from .positions import PositionManager
 
 logger = logging.getLogger(__name__)
+
+# Cache for strategy max_positions lookup with TTL
+_strategy_max_positions_cache: dict[str, int] = {}
+_strategy_cache_timestamp: float = 0.0
+_STRATEGY_CACHE_TTL_SECONDS: float = 60.0  # Refresh cache every 60 seconds
+
+
+def _get_strategy_max_positions(strategy_name: str) -> Optional[int]:
+    """
+    Get max_positions for a strategy from the loaded strategies.
+
+    Uses a TTL cache (60s) to avoid reloading strategies on every check
+    while ensuring config changes are picked up promptly.
+    Returns None if strategy not found or doesn't have max_positions.
+    """
+    global _strategy_max_positions_cache, _strategy_cache_timestamp
+
+    current_time = time.time()
+    cache_age = current_time - _strategy_cache_timestamp
+
+    # Refresh cache if expired or empty
+    if cache_age > _STRATEGY_CACHE_TTL_SECONDS or not _strategy_max_positions_cache:
+        try:
+            from strategies.loader import load_strategies
+            strategies = load_strategies()
+
+            # Clear and rebuild cache
+            _strategy_max_positions_cache.clear()
+            for strategy in strategies:
+                max_pos = getattr(strategy, 'max_positions', None)
+                if max_pos is not None:
+                    _strategy_max_positions_cache[strategy.name] = max_pos
+
+            _strategy_cache_timestamp = current_time
+            logger.debug(f"Refreshed strategy max_positions cache: {_strategy_max_positions_cache}")
+        except Exception as e:
+            logger.warning(f"Failed to load strategy max_positions: {e}")
+            # Don't update timestamp so we retry next time
+            return None
+
+    return _strategy_max_positions_cache.get(strategy_name)
 
 
 @dataclass
@@ -112,7 +154,16 @@ class RiskManager:
         strategy_name = getattr(signal, 'strategy_name', None)
 
         # Check 1: Position count limit (per-strategy first, fall back to global)
-        per_strategy_limit = getattr(risk, "max_positions_per_strategy", None)
+        # CRITICAL: Paper and live have DIFFERENT limits
+        # - Paper: 40 positions per strategy (from config, allows broad testing)
+        # - Live: Use strategy's max_positions if set, else 10 (conservative default)
+        if self.is_paper:
+            per_strategy_limit = getattr(risk, "max_positions_per_strategy", 40)
+        else:
+            # Live trading: check if strategy has custom max_positions, else default 10
+            strategy_max = _get_strategy_max_positions(strategy_name) if strategy_name else None
+            per_strategy_limit = strategy_max if strategy_max is not None else 10
+
         if strategy_name and per_strategy_limit:
             position_count = self.position_manager.get_position_count(
                 db, strategy_name=strategy_name
