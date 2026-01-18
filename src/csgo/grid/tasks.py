@@ -48,7 +48,7 @@ def match_grid_series(self):
         matches = matcher.match_unmatched_markets(
             hours_before=24,
             hours_after=72,
-            time_window_hours=48,
+            time_window_hours=6,  # Tighter window to avoid false matches
         )
         saved = matcher.save_matches(matches)
 

@@ -38,13 +38,15 @@ class UncertainZoneStrategy(Strategy):
         include_l3_from_excluded_l1: dict = None,  # e.g., {"SPORTS": ["SPREAD", "OVER_UNDER"]} - whitelist L3s from excluded L1
         exclude_patterns: list = None,  # Optional: exclude markets matching these question patterns
         include_patterns: list = None,  # Optional: ALLOW uncategorized markets matching these patterns
+        excluded_l2_l3_combos: list = None,  # Optional: exclude specific L2+L3 combos, e.g., [["DOTA2", "MATCH_WINNER_BO3"]]
         size_pct: float = 0.01,
+        min_size_usd: float = None,  # Optional: minimum size in USD (uses max of this and size_pct)
         order_type: str = "market",
         max_positions: int = None,  # Max concurrent positions for live trading
         **kwargs,
     ):
         self.name = name
-        self.version = "2.5.1"  # Added max_positions parameter
+        self.version = "2.5.2"  # Added min_size_usd parameter
         self.max_positions = max_positions
         self.yes_price_min = yes_price_min
         self.yes_price_max = yes_price_max
@@ -65,7 +67,9 @@ class UncertainZoneStrategy(Strategy):
         self.include_l3_from_excluded_l1 = include_l3_from_excluded_l1 or {}
         self.exclude_patterns = exclude_patterns or []
         self.include_patterns = include_patterns or []  # Whitelist patterns for uncategorized markets
+        self.excluded_l2_l3_combos = excluded_l2_l3_combos or []  # e.g., [["DOTA2", "MATCH_WINNER_BO3"]]
         self.size_pct = size_pct
+        self.min_size_usd = min_size_usd
         self.order_type = order_type
         super().__init__()
 
@@ -119,6 +123,16 @@ class UncertainZoneStrategy(Strategy):
                 continue
             if self.excluded_l3_categories and m.category_l3 in self.excluded_l3_categories:
                 continue
+
+            # L2+L3 combo exclusions (e.g., exclude DOTA2 MATCH_WINNER_BO3 specifically)
+            if self.excluded_l2_l3_combos:
+                combo_excluded = False
+                for combo in self.excluded_l2_l3_combos:
+                    if len(combo) >= 2 and m.category_l2 == combo[0] and m.category_l3 == combo[1]:
+                        combo_excluded = True
+                        break
+                if combo_excluded:
+                    continue
 
             # Pattern-based exclusions (for uncategorized markets or additional filtering)
             if not self._passes_pattern_filters(m):
@@ -208,6 +222,7 @@ class UncertainZoneStrategy(Strategy):
                     "hours_to_close": m.hours_to_close,
                     "expected_rate": expected_rate,
                     "size_pct": self.size_pct,
+                    "min_size_usd": self.min_size_usd,
                 },
             )
 
@@ -239,6 +254,11 @@ class UncertainZoneStrategy(Strategy):
             return False
         if self.excluded_l3_categories and m.category_l3 in self.excluded_l3_categories:
             return False
+        # L2+L3 combo exclusions
+        if self.excluded_l2_l3_combos:
+            for combo in self.excluded_l2_l3_combos:
+                if len(combo) >= 2 and m.category_l2 == combo[0] and m.category_l3 == combo[1]:
+                    return False
         return True
 
     def _passes_pattern_filters(self, m: MarketData) -> bool:

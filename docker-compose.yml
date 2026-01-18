@@ -82,6 +82,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - GRID_API_KEY=B9jpiYiZVSeSEVNor6f6cjKqSnfXtNaANor9siSN
     depends_on:
       postgres:
         condition: service_healthy
@@ -206,7 +207,30 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
-  # === EXECUTOR ===
+  # === STREAMING EXECUTOR (Real-time book imbalance) ===
+  streaming-executor:
+    build: .
+    command: python -m src.streaming.runner
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/polymarket_ml
+      - REDIS_URL=redis://redis:6379/0
+      - POLYMARKET_PRIVATE_KEY=${POLYMARKET_PRIVATE_KEY:-}
+      - POLYMARKET_FUNDER_ADDRESS=${POLYMARKET_FUNDER_ADDRESS:-}
+      - TRADING_PROXY_URL=${TRADING_PROXY_URL:-}
+      - TRADING_PROXY_FALLBACKS=${TRADING_PROXY_FALLBACKS:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    logging: *default-logging
+
+  # === EXECUTOR (Polling-based) ===
   executor:
     build: .
     command: python -m src.executor.engine.runner

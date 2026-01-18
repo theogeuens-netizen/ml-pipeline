@@ -1504,6 +1504,23 @@ export const api = {
     if (strategy) params.set('strategy', strategy)
     return fetchJson<CSGOExitQuality>(`/api/csgo/engine/exit-quality?${params}`)
   },
+
+  // GRID Integration endpoints
+  getGRIDStats: () => fetchJson<GRIDStats>('/api/grid/stats'),
+
+  getGRIDEvents: (params?: { limit?: number; offset?: number; event_type?: string }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.limit) searchParams.set('limit', String(params.limit))
+    if (params?.offset) searchParams.set('offset', String(params.offset))
+    if (params?.event_type) searchParams.set('event_type', params.event_type)
+    const qs = searchParams.toString()
+    return fetchJson<GRIDEventsResponse>(`/api/grid/events${qs ? `?${qs}` : ''}`)
+  },
+
+  getGRIDMatches: (includeClosed = false) =>
+    fetchJson<GRIDMatchesResponse>(`/api/grid/matches?include_closed=${includeClosed}`),
+
+  getGRIDPollerState: () => fetchJson<GRIDPollerStateResponse>('/api/grid/poller-state'),
 }
 
 // Analytics types
@@ -1850,4 +1867,103 @@ export interface CSGOExitQuality {
     position_count: number
   }[]
   positions: CSGOExitQualityPosition[]
+}
+
+// GRID Integration types
+export interface GRIDStats {
+  events_24h: number
+  series_polling: number
+  last_poll_at: string | null
+  matches_linked: number
+  markets_linked: number
+}
+
+export interface GRIDEvent {
+  id: number
+  market_id: number
+  grid_series_id: string
+  event_type: 'round' | 'map' | 'series'
+  winner: 'YES' | 'NO'
+  detected_at: string
+  map_name: string | null
+  map_number: number | null
+  format: string | null
+  is_overtime: boolean
+  rounds_in_event: number | null
+  // Scores
+  prev_round_yes: number | null
+  prev_round_no: number | null
+  new_round_yes: number | null
+  new_round_no: number | null
+  prev_map_yes: number | null
+  prev_map_no: number | null
+  new_map_yes: number | null
+  new_map_no: number | null
+  // Prices
+  price_at_detection: number | null
+  spread_at_detection: number | null
+  price_after_30sec: number | null
+  price_after_1min: number | null
+  price_after_5min: number | null
+  price_move_30sec: number | null
+  price_move_1min: number | null
+  price_move_5min: number | null
+  move_direction_correct: boolean | null
+  // Team info
+  team_yes: string | null
+  team_no: string | null
+}
+
+export interface GRIDEventsResponse {
+  total: number
+  offset: number
+  limit: number
+  items: GRIDEvent[]
+}
+
+export interface GRIDMatch {
+  id: number
+  market_id: number
+  team_yes: string | null
+  team_no: string | null
+  grid_series_id: string
+  grid_yes_team_id: string | null
+  grid_match_confidence: number | null
+  game_start_time: string | null
+  format: string | null
+  market_type: string | null
+  closed: boolean
+  resolved: boolean
+}
+
+export interface GRIDMatchesResponse {
+  total: number
+  items: GRIDMatch[]
+}
+
+export interface GRIDPollerStateGame {
+  map_name: string | null
+  yes_rounds: number
+  no_rounds: number
+  winner: string | null
+  finished: boolean
+}
+
+export interface GRIDPollerState {
+  series_id: string
+  market_id: number
+  team_yes: string | null
+  team_no: string | null
+  last_poll_at: string | null
+  polls_count: number
+  format: string | null
+  finished: boolean | null
+  yes_maps: number | null
+  no_maps: number | null
+  games: GRIDPollerStateGame[]
+}
+
+export interface GRIDPollerStateResponse {
+  total: number
+  items: GRIDPollerState[]
 }

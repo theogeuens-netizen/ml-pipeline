@@ -27,13 +27,13 @@ from src.db.models import Market, TaskRun, CategorizationRule
 
 logger = structlog.get_logger()
 
-# Batch sizes for Claude (keep small for token limits)
-CLAUDE_BATCH_SIZE = 15
+# Batch sizes for Claude categorization (2 batches of 100 = 200 per hour)
+CLAUDE_BATCH_SIZE = 100
 VALIDATION_SAMPLE_SIZE = 50
 
 
 @shared_task(name="src.tasks.categorization.categorize_with_rules")
-def categorize_with_rules(limit: int = 1000) -> dict:
+def categorize_with_rules(limit: int = 2000) -> dict:
     """
     Categorize uncategorized markets using rule-based matching.
 

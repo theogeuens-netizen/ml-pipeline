@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 # Minimum similarity score (0-100) to consider a match
 MIN_MATCH_SCORE = 70
+# Minimum score for EACH team (prevents one perfect match carrying a bad one)
+MIN_INDIVIDUAL_SCORE = 60
 
 # Team name normalization patterns
 TEAM_NAME_REPLACEMENTS = {
@@ -168,6 +170,11 @@ def match_series_to_market(
 
         # Combined score - both teams should match well
         combined_score = (primary_score + secondary_score) / 2
+
+        # BOTH teams must individually meet minimum threshold
+        # This prevents "777 vs ARCRED" matching "777 vs Fingers Crossed"
+        if primary_score < MIN_INDIVIDUAL_SCORE or secondary_score < MIN_INDIVIDUAL_SCORE:
+            continue
 
         if combined_score > best_score and combined_score >= MIN_MATCH_SCORE:
             best_score = combined_score

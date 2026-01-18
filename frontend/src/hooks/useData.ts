@@ -189,3 +189,36 @@ export function useCategorizationRules(limit = 50, offset = 0) {
     refetchInterval: 120000,
   })
 }
+
+// GRID Integration hooks
+export function useGRIDStats() {
+  return useQuery({
+    queryKey: ['gridStats'],
+    queryFn: api.getGRIDStats,
+    refetchInterval: 10000, // 10 second refresh
+  })
+}
+
+export function useGRIDEvents(params?: Parameters<typeof api.getGRIDEvents>[0]) {
+  return useQuery({
+    queryKey: ['gridEvents', params],
+    queryFn: () => api.getGRIDEvents(params),
+    refetchInterval: 5000, // 5 second refresh for live events
+  })
+}
+
+export function useGRIDMatches(includeClosed = false) {
+  return useQuery({
+    queryKey: ['gridMatches', includeClosed],
+    queryFn: () => api.getGRIDMatches(includeClosed),
+    refetchInterval: 30000,
+  })
+}
+
+export function useGRIDPollerState() {
+  return useQuery({
+    queryKey: ['gridPollerState'],
+    queryFn: api.getGRIDPollerState,
+    refetchInterval: 5000, // 5 second refresh for live state
+  })
+}

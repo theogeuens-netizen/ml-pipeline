@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import structlog
 
 from src.api.routes import health, stats, markets, tasks, data_quality, monitoring, database, categorization
-from src.api.routes import executor, strategies, executor_config, executor_ws, csgo
+from src.api.routes import executor, strategies, executor_config, executor_ws, csgo, grid
 from src.csgo.engine.api import router as csgo_engine_router
 
 logger = structlog.get_logger()
@@ -64,6 +64,7 @@ app.include_router(executor_config.router, prefix="/api", tags=["Executor Config
 app.include_router(executor_ws.router, prefix="/api", tags=["Executor WebSocket"])
 app.include_router(csgo.router, prefix="/api", tags=["CS:GO Strategy"])
 app.include_router(csgo_engine_router, prefix="/api", tags=["CS:GO Engine"])
+app.include_router(grid.router, prefix="/api", tags=["GRID Integration"])
 
 
 @app.get("/")

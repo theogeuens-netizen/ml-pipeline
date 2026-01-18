@@ -63,14 +63,15 @@ uncertain_zone:
   # Learning: Excluding SPORTS actually hurts performance vs excluding CRYPTO+SPORTS
 
   - name: no_bias_tight_2h_no_crypto_sports
-    live: true  # ENABLED - Option B filters with esports handicap
+    live: false  # KILLED Jan 15 - edge died, 44.9% WR live, -$20 P&L
     max_positions: 20           # Max 20 concurrent live positions
     yes_price_min: 0.48
     yes_price_max: 0.52
     min_hours: 2
     max_hours: 4
     expected_no_rate: 0.55
-    size_pct: 0.01            # 1% of wallet (~$1 per trade) for live
+    size_pct: 0.02            # 2% of wallet
+    min_size_usd: 2.0         # Minimum $2 per trade (uses max of $2 or 2%)
     excluded_categories:
       - CRYPTO
       - SPORTS              # Exclude SPORTS except whitelisted L3s below
@@ -81,9 +82,23 @@ uncertain_zone:
         - SPREAD            # 69.2% WR, statistically significant (z=1.96)
         - OVER_UNDER        # 55.7% WR, high volume
         - PROP_PLAYER       # 55.0% WR, decent volume
-    # Exclude L2 categories with proven negative edge
+    # Exclude L2 categories with proven negative edge (Jan 13, 2026 analysis)
     excluded_l2_categories:
-      - TEMPERATURE         # 0% WR, -$22 P&L, statistically significant loser (z=-2.45)
+      - TEMPERATURE         # 0% WR, -$22 P&L
+      # O/U losers (all <50% WR with significant sample sizes):
+      - NHL                 # 36% WR, -$98 (132 trades)
+      - SOCCER_LALIGA       # 31% WR, -$84 (52 trades)
+      - COLLEGE_BASKETBALL  # 46% WR, -$66 (273 trades)
+      - SOCCER_SERIE_A      # 44% WR, -$57 (75 trades)
+      - SOCCER_OTHER        # 45% WR, -$32 (188 trades)
+      - EPL                 # 46% WR, -$26 (118 trades)
+      - SOCCER_MLS          # 39% WR, -$18 (26 trades)
+      - SOCCER_LIGUE1       # 20% WR, -$11 (10 trades)
+      - SOCCER_BUNDESLIGA   # 36% WR, -$9 (22 trades)
+      - ICE_HOCKEY_OTHER    # 40% WR, -$11 (15 trades)
+    # Exclude specific L2+L3 combos
+    excluded_l2_l3_combos:
+      - [COLLEGE_FOOTBALL, SPREAD]  # 41% WR, -$62 (126 trades) - SPREAD loses here
     # Pattern-based exclusions for uncategorized markets
     exclude_patterns:
       - "temperature"
@@ -91,6 +106,20 @@ uncertain_zone:
       - "°C"
       - "Map \\d+ Winner"         # Individual map winners: 38% WR, -$17 (n=111, statistically significant)
       - "Game Handicap:"          # Different handicap format: 33% WR, -$79 (n=18)
+      # College basketball detection (miscategorized as NBA) - O/U totals 100-189 are college range
+      - "O/U 1[0-8]\\d\\.5"       # Matches O/U 100.5 through O/U 189.5 (college basketball)
+      # College team names not in NBA/NHL
+      - "Dragons"                 # Drexel, etc.
+      - "Musketeers"              # Xavier
+      - "Friars"                  # Providence
+      - "River Hawks"             # UMass Lowell
+      - "Blue Devils"             # Duke, Central Connecticut
+      - "Monmouth"                # Monmouth Hawks
+      - "Blazers(?!.*Trail)"      # UAB Blazers (but not Trail Blazers)
+      - "Bulldogs"                # Many college teams
+      - "Golden Flashes"          # Kent State
+      - "Midshipmen"              # Navy
+      - "Fighting"                # Fighting Irish, Fighting Camels, etc.
     # CRITICAL: Whitelist patterns for uncategorized markets
     # NOTE: Patterns must be precise to avoid matching unrelated markets (e.g., dates)
     # Analysis (235 resolved trades, +$190 P&L):
@@ -122,6 +151,11 @@ uncertain_zone:
   # Expected improvement: +$28.47 P&L (+16%)
   # =========================================================================
   - name: no_bias_tight_2h_filtered
+    live: true  # ENABLED Jan 15 - 57.2% WR paper, +$357 P&L, improving weekly
+    max_positions: 20           # Max 20 concurrent live positions
+    size_pct: 0.02              # 2% of wallet
+    min_size_usd: 2.0           # Minimum $2 per trade
+    order_type: market          # Use market orders for reliable fills
     yes_price_min: 0.48
     yes_price_max: 0.52
     min_hours: 2
@@ -132,9 +166,12 @@ uncertain_zone:
       - SPORTS
       - WEATHER      # 0% WR, -$17.65
       - OTHER        # 0% WR, -$8.00
+    excluded_l2_categories:
+      - DOTA2          # 48.2% WR, -$8 P&L - dragging down performance
+      - MOBILE_LEGENDS # 0% WR, -$14.82 P&L
     excluded_l3_categories:
       - MAP_WINNER   # 46.2% WR, -$15.47 (individual map bets have reverse bias)
-    # Analysis: analysis-001 (Jan 2026)
+    # Analysis: analysis-001 (Jan 2026), updated Jan 15 with L2 exclusions
 
   # =========================================================================
   # P0 OPTIMIZATION V2: Full optimization based on analysis-002 (Jan 5, 2026)
@@ -170,23 +207,29 @@ uncertain_zone:
   # 3% sizing for high-conviction, concentrated exposure
   # =========================================================================
   - name: no_bias_esports_2h
+    live: true                     # ENABLED Jan 13, 2026
+    max_positions: 15              # Max concurrent live positions
     yes_price_min: 0.48            # Backtest: 73% WR in 0.48-0.50
     yes_price_max: 0.50            # NOT 0.50-0.52 (42% WR, loses money)
     min_hours: 2
     max_hours: 4
+    max_spread: 0.03               # 3% max spread - filter at signal generation
     expected_no_rate: 0.73         # 73% from historical backtest (322 trades)
-    size_pct: 0.05                 # 5% per trade (high conviction)
+    size_pct: 0.02                 # 2% per trade
+    min_size_usd: 2.0              # Minimum $2 per trade
+    order_type: market             # Use market orders for reliable fills
     categories:
       - ESPORTS                    # Only trade ESPORTS
     excluded_l3_categories:
       - MAP_WINNER                 # 44-46% WR, reverse bias on individual maps
+    excluded_l2_l3_combos:
+      - [DOTA2, MATCH_WINNER_BO3]  # 46.6% WR, -$42 (176 trades) - no edge
     exclude_patterns:
       - "Map \\d+ Winner"          # Individual map winners: 38% WR (n=111)
       - "Game Handicap:"           # Different handicap format: 33% WR (n=18)
-    # Backtest: Jan 5, 2026 - 47.8M snapshots, 24.8K resolved markets
-    # ESPORTS 0.48-0.50: 322 trades, 73.3% WR, +$0.237/dollar
-    # ESPORTS 0.50-0.52: 187 trades, 42.2% WR, -$0.085/dollar (LOSING)
-    # Strong L2s: CSGO, HONOR_OF_KINGS, DOTA2, LOL
+    # Paper: 383 trades, 56.9% WR, +$1,290 P&L
+    # After excluding DOTA2 MATCH_WINNER_BO3: expect ~60% WR
+    # Strong L2s: CSGO MAPS_TOTAL (69% WR), LOL MATCH_WINNER_BO3 (83% WR)
 
   # =========================================================================
   # YES BIAS CRYPTO: Exploit reverse bias in crypto direction markets
@@ -398,17 +441,17 @@ book_imbalance_momentum:
   # Safeguards: small size ($2), low max positions (3), 5min buffer
   # =========================================================================
   - name: book_imbalance_crypto
-    live: true                      # ENABLED with safeguards
-    max_positions: 3                # Conservative: 3 concurrent
+    live: false                     # DISABLED
+    max_positions: 5                # 5 concurrent positions
     fixed_size_usd: 1.1             # Ultra-conservative: $1.1 per trade
     min_imbalance: 0.5              # |imbalance| > 50% required
     yes_price_min: 0.30             # Price zone 30-70%
     yes_price_max: 0.70
     max_spread: 0.02                # 2c max spread
-    min_minutes_to_close: 5         # Conservative: 5 min buffer (was 2)
+    min_minutes_to_close: 2         # 2 min buffer before close
     categories:
       - CRYPTO                      # 89.9% WR in paper (199 trades)
-    max_hold_hours: 1.0             # Exit after 1 hour
+    max_hold_hours: 9999            # Hold to resolution
     profit_target_pct: 1.0          # Disabled - hold to resolution
     cooldown_minutes: 60            # 60 min between entries same market
     size_pct: 0.05                  # Fallback if fixed_size_usd not used
@@ -474,3 +517,39 @@ xgb_imbalance:
     max_positions: 20
     cooldown_minutes: 60
     enabled: true
+
+# =============================================================================
+# STREAMING BOOK IMBALANCE (Real-time execution via WebSocket)
+# Dedicated WebSocket → In-memory evaluation → Sub-second execution
+# Paper by default, set live: true for real money
+# Targets: CRYPTO markets <4h to expiry
+# =============================================================================
+streaming_book_imbalance:
+  - name: streaming_imbalance_crypto
+    enabled: true
+    live: false                       # PAPER first - set to true for real money
+
+    # Strategy parameters
+    min_imbalance: 0.5                # |imbalance| >= 50% required
+    yes_price_min: 0.30               # Price zone 30-70%
+    yes_price_max: 0.70
+    max_spread: 0.02                  # 2% max spread
+
+    # Market selection
+    categories:
+      - CRYPTO
+    max_hours_to_close: 4.0           # Only <4h markets
+    min_minutes_to_close: 2           # 2 min buffer before resolution
+
+    # Position management
+    max_positions: 5
+    fixed_size_usd: 1.1               # Ultra-conservative sizing
+    cooldown_minutes: 60
+
+    # Safety (stricter than polling)
+    max_signal_age_seconds: 5.0       # 5s max (vs 120s polling)
+    max_price_deviation: 0.03         # 3% max (vs 5% polling)
+    max_fee_rate_bps: 200
+
+    # WebSocket
+    subscription_refresh_interval: 300  # 5 min

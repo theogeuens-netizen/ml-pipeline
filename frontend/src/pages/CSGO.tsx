@@ -10,6 +10,12 @@ import {
   CSGOExitQuality,
   CSGOPerformanceByMarket,
 } from '../api/client'
+import {
+  useGRIDStats,
+  useGRIDEvents,
+  useGRIDMatches,
+  useGRIDPollerState,
+} from '../hooks/useData'
 import { clsx } from 'clsx'
 import {
   LineChart,
@@ -38,7 +44,7 @@ interface LifecycleEvent {
   reason?: string
 }
 
-type TabType = 'pipeline' | 'positions' | 'chart' | 'engine' | 'analytics'
+type TabType = 'pipeline' | 'positions' | 'chart' | 'engine' | 'analytics' | 'grid'
 
 export default function CSGO() {
   const [activeTab, setActiveTab] = useState<TabType>('engine')
@@ -147,6 +153,11 @@ export default function CSGO() {
             onClick={() => setActiveTab('analytics')}
             label="Analytics"
           />
+          <TabButton
+            active={activeTab === 'grid'}
+            onClick={() => setActiveTab('grid')}
+            label="GRID"
+          />
         </div>
       </div>
 
@@ -196,6 +207,10 @@ export default function CSGO() {
 
       {activeTab === 'analytics' && (
         <AnalyticsPanel />
+      )}
+
+      {activeTab === 'grid' && (
+        <GRIDPanel />
       )}
     </div>
   )
@@ -2470,6 +2485,321 @@ function StrategyDeepDive({ strategies }: { strategies: CSGOEngineStrategyState[
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ============================================
+// GRID Integration Panel
+// ============================================
+
+function GRIDPanel() {
+  const [eventTypeFilter, setEventTypeFilter] = useState<string>('')
+  const [includeClosed, setIncludeClosed] = useState(false)
+
+  const { data: stats, isLoading: statsLoading } = useGRIDStats()
+  const { data: events, isLoading: eventsLoading } = useGRIDEvents({
+    limit: 100,
+    event_type: eventTypeFilter || undefined,
+  })
+  const { data: matches, isLoading: matchesLoading } = useGRIDMatches(includeClosed)
+  const { data: pollerState, isLoading: pollerLoading } = useGRIDPollerState()
+
+  // Format relative time
+  const formatRelativeTime = (dateStr: string | null) => {
+    if (!dateStr) return '—'
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffSec = Math.floor(diffMs / 1000)
+    const diffMin = Math.floor(diffSec / 60)
+    const diffHour = Math.floor(diffMin / 60)
+
+    if (diffSec < 60) return `${diffSec}s ago`
+    if (diffMin < 60) return `${diffMin}m ago`
+    return `${diffHour}h ${diffMin % 60}m ago`
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-5 gap-4">
+        <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+          <div className="text-gray-400 text-sm">Events (24h)</div>
+          <div className="text-2xl font-bold text-white mt-1">
+            {statsLoading ? '...' : stats?.events_24h ?? 0}
+          </div>
+        </div>
+        <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+          <div className="text-gray-400 text-sm">Series Polling</div>
+          <div className="text-2xl font-bold text-white mt-1">
+            {statsLoading ? '...' : stats?.series_polling ?? 0}
+          </div>
+        </div>
+        <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+          <div className="text-gray-400 text-sm">Last Poll</div>
+          <div className="text-xl font-bold text-white mt-1">
+            {statsLoading ? '...' : formatRelativeTime(stats?.last_poll_at ?? null)}
+          </div>
+        </div>
+        <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+          <div className="text-gray-400 text-sm">Matches Linked</div>
+          <div className="text-2xl font-bold text-white mt-1">
+            {statsLoading ? '...' : stats?.matches_linked ?? 0}
+          </div>
+        </div>
+        <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+          <div className="text-gray-400 text-sm">Markets Linked</div>
+          <div className="text-2xl font-bold text-white mt-1">
+            {statsLoading ? '...' : stats?.markets_linked ?? 0}
+          </div>
+        </div>
+      </div>
+
+      {/* Events Table */}
+      <div className="bg-gray-800/50 rounded-lg border border-gray-700">
+        <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-white">Recent Events</h3>
+          <div className="flex items-center gap-4">
+            <select
+              value={eventTypeFilter}
+              onChange={(e) => setEventTypeFilter(e.target.value)}
+              className="bg-gray-700 text-white rounded px-3 py-1.5 text-sm border border-gray-600"
+            >
+              <option value="">All Types</option>
+              <option value="round">Round</option>
+              <option value="map">Map</option>
+              <option value="series">Series</option>
+            </select>
+            <span className="text-gray-400 text-sm">
+              {events?.total ?? 0} events
+            </span>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-700/50">
+              <tr>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Time</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Type</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Match</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Map</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Score</th>
+                <th className="px-4 py-3 text-center text-gray-300 font-medium">Winner</th>
+                <th className="px-4 py-3 text-right text-gray-300 font-medium">Price</th>
+                <th className="px-4 py-3 text-right text-gray-300 font-medium">Move (1m)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-700">
+              {eventsLoading ? (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+              ) : events?.items.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No events</td></tr>
+              ) : (
+                events?.items.map((e) => (
+                  <tr key={e.id} className="hover:bg-gray-700/30">
+                    <td className="px-4 py-2 text-gray-400 font-mono text-xs">
+                      {new Date(e.detected_at).toLocaleTimeString()}
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className={clsx(
+                        'px-2 py-0.5 rounded text-xs font-medium',
+                        e.event_type === 'round' && 'bg-blue-500/20 text-blue-400',
+                        e.event_type === 'map' && 'bg-purple-500/20 text-purple-400',
+                        e.event_type === 'series' && 'bg-orange-500/20 text-orange-400',
+                      )}>
+                        {e.event_type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-white">
+                      {e.team_yes && e.team_no ? (
+                        <span className="font-medium">
+                          {e.team_yes} vs {e.team_no}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">Unknown</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-gray-300">{e.map_name ?? '—'}</td>
+                    <td className="px-4 py-2 text-gray-300 font-mono">
+                      {e.event_type === 'round' ? (
+                        <>
+                          {e.prev_round_yes ?? '-'}-{e.prev_round_no ?? '-'} → {e.new_round_yes ?? '-'}-{e.new_round_no ?? '-'}
+                        </>
+                      ) : e.event_type === 'map' ? (
+                        <>Map {e.map_number}: {e.new_map_yes ?? '-'}-{e.new_map_no ?? '-'}</>
+                      ) : (
+                        <>Series: {e.new_map_yes ?? '-'}-{e.new_map_no ?? '-'}</>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      <span className={clsx(
+                        'font-bold',
+                        e.winner === 'YES' ? 'text-green-400' : 'text-red-400'
+                      )}>
+                        {e.winner}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono text-gray-300">
+                      {e.price_at_detection ? `${(e.price_at_detection * 100).toFixed(1)}%` : '—'}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono">
+                      {e.price_move_1min !== null ? (
+                        <span className={e.price_move_1min >= 0 ? 'text-green-400' : 'text-red-400'}>
+                          {e.price_move_1min >= 0 ? '+' : ''}{(e.price_move_1min * 100).toFixed(2)}%
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Matched Markets */}
+      <div className="bg-gray-800/50 rounded-lg border border-gray-700">
+        <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-white">Matched Markets</h3>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-sm text-gray-400">
+              <input
+                type="checkbox"
+                checked={includeClosed}
+                onChange={(e) => setIncludeClosed(e.target.checked)}
+                className="rounded bg-gray-700 border-gray-600"
+              />
+              Include closed
+            </label>
+            <span className="text-gray-400 text-sm">
+              {matches?.total ?? 0} matches
+            </span>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-700/50">
+              <tr>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Team YES</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Team NO</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Format</th>
+                <th className="px-4 py-3 text-right text-gray-300 font-medium">Confidence</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Start Time</th>
+                <th className="px-4 py-3 text-center text-gray-300 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-700">
+              {matchesLoading ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+              ) : matches?.items.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No matches linked</td></tr>
+              ) : (
+                matches?.items.map((m) => (
+                  <tr key={m.id} className="hover:bg-gray-700/30">
+                    <td className="px-4 py-2 text-white font-medium">{m.team_yes ?? '—'}</td>
+                    <td className="px-4 py-2 text-white font-medium">{m.team_no ?? '—'}</td>
+                    <td className="px-4 py-2 text-gray-300">{m.format ?? '—'}</td>
+                    <td className="px-4 py-2 text-right">
+                      {m.grid_match_confidence !== null ? (
+                        <span className={clsx(
+                          'font-mono',
+                          m.grid_match_confidence >= 0.9 ? 'text-green-400' :
+                          m.grid_match_confidence >= 0.7 ? 'text-yellow-400' : 'text-red-400'
+                        )}>
+                          {(m.grid_match_confidence * 100).toFixed(0)}%
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-gray-300">
+                      {m.game_start_time ? new Date(m.game_start_time).toLocaleString() : '—'}
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      {m.resolved ? (
+                        <span className="px-2 py-0.5 rounded text-xs bg-gray-500/20 text-gray-400">Resolved</span>
+                      ) : m.closed ? (
+                        <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-400">Closed</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-xs bg-green-500/20 text-green-400">Active</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Poller State */}
+      <div className="bg-gray-800/50 rounded-lg border border-gray-700">
+        <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-white">Live Poller State</h3>
+          <span className="text-gray-400 text-sm">
+            {pollerState?.total ?? 0} series being polled
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-700/50">
+              <tr>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Match</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Format</th>
+                <th className="px-4 py-3 text-center text-gray-300 font-medium">Maps</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Current Game</th>
+                <th className="px-4 py-3 text-right text-gray-300 font-medium">Polls</th>
+                <th className="px-4 py-3 text-left text-gray-300 font-medium">Last Poll</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-700">
+              {pollerLoading ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+              ) : pollerState?.items.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No active polling</td></tr>
+              ) : (
+                pollerState?.items.map((s) => {
+                  const currentGame = s.games?.find((g) => !g.finished)
+                  return (
+                    <tr key={s.series_id} className="hover:bg-gray-700/30">
+                      <td className="px-4 py-2 text-white font-medium">
+                        {s.team_yes && s.team_no ? `${s.team_yes} vs ${s.team_no}` : s.series_id}
+                      </td>
+                      <td className="px-4 py-2 text-gray-300">{s.format ?? '—'}</td>
+                      <td className="px-4 py-2 text-center font-mono">
+                        <span className="text-green-400">{s.yes_maps ?? 0}</span>
+                        <span className="text-gray-500"> - </span>
+                        <span className="text-red-400">{s.no_maps ?? 0}</span>
+                      </td>
+                      <td className="px-4 py-2 text-gray-300">
+                        {currentGame ? (
+                          <>
+                            {currentGame.map_name ?? 'Map ?'}: {' '}
+                            <span className="font-mono">
+                              <span className="text-green-400">{currentGame.yes_rounds}</span>
+                              <span className="text-gray-500"> - </span>
+                              <span className="text-red-400">{currentGame.no_rounds}</span>
+                            </span>
+                          </>
+                        ) : s.finished ? (
+                          <span className="text-gray-500">Finished</span>
+                        ) : (
+                          <span className="text-gray-500">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right text-gray-400 font-mono">{s.polls_count}</td>
+                      <td className="px-4 py-2 text-gray-400">{formatRelativeTime(s.last_poll_at)}</td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }

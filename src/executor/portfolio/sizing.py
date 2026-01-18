@@ -71,18 +71,29 @@ class PositionSizer:
         # Default to 400 if not provided (standard per-strategy allocation)
         kelly_capital = strategy_capital if strategy_capital is not None else 400.0
 
-        # Check for per-strategy size_pct in decision_inputs (takes priority)
+        # Check for per-strategy sizing in decision_inputs (takes priority)
         size_pct = None
+        min_size_usd = None
         if hasattr(signal, 'decision_inputs') and signal.decision_inputs:
             size_pct = signal.decision_inputs.get('size_pct')
+            min_size_usd = signal.decision_inputs.get('min_size_usd')
 
         if size_pct is not None and size_pct > 0:
-            # Use per-strategy fixed percentage sizing
-            size = kelly_capital * size_pct
-            logger.debug(
-                f"Using per-strategy sizing: size_pct={size_pct:.1%}, "
-                f"capital=${kelly_capital}, size=${size:.2f}"
-            )
+            # Use per-strategy percentage sizing with optional minimum
+            pct_size = kelly_capital * size_pct
+            if min_size_usd is not None and min_size_usd > 0:
+                # max(min_size_usd, capital * size_pct)
+                size = max(min_size_usd, pct_size)
+                logger.debug(
+                    f"Using per-strategy sizing: max(${min_size_usd:.2f}, "
+                    f"{size_pct:.1%} of ${kelly_capital:.2f}) = ${size:.2f}"
+                )
+            else:
+                size = pct_size
+                logger.debug(
+                    f"Using per-strategy sizing: size_pct={size_pct:.1%}, "
+                    f"capital=${kelly_capital}, size=${size:.2f}"
+                )
         # Calculate base size based on method from config
         elif sizing.method == SizingMethod.PERCENT:
             size = self._percent_size(sizing)
